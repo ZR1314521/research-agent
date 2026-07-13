@@ -1,4 +1,12 @@
-# Local API requirements; install separately only when bootstrap dependencies are absent.
-fastapi==0.139.0
-uvicorn==0.51.0
-python-multipart==0.0.32
+# Core
+fastapi>=0.100.0
+uvicorn>=0.20.0
+python-multipart>=0.0.5
+
+# Document processing
+python-docx>=0.8.0
+pypdf>=3.0.0
+
+# Data analysis (optional, for experiment-data-analysis and run-code)
+pandas>=2.0.0
+openpyxl>=3.0.0
