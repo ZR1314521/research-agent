@@ -1,0 +1,189 @@
+[
+  {
+    "key": "gbt7714-numeric",
+    "display_name": "GB/T 7714-2015 numeric",
+    "citation_mode": "numeric",
+    "csl_file": "china-national-standard-gb-t-7714-2015-numeric.csl",
+    "source": "CSL official styles repository plus GB/T 7714 public summaries",
+    "max_authors_before_et_al": 3,
+    "et_al": "等",
+    "journal_title_case": "as_provided",
+    "notes": "Use Chinese punctuation and document type marks. Full official standard text is not bundled."
+  },
+  {
+    "key": "gbt7714-author-date",
+    "display_name": "GB/T 7714-2015 author-date",
+    "citation_mode": "author-date",
+    "csl_file": "china-national-standard-gb-t-7714-2015-author-date.csl",
+    "source": "CSL official styles repository plus GB/T 7714 public summaries",
+    "max_authors_before_et_al": 3,
+    "et_al": "等",
+    "journal_title_case": "as_provided",
+    "notes": "Author-year variant for Chinese academic manuscripts."
+  },
+  {
+    "key": "ieee",
+    "display_name": "IEEE",
+    "citation_mode": "numeric",
+    "csl_file": "ieee.csl",
+    "source": "IEEE Author Center editorial style page and CSL official style",
+    "max_authors_before_et_al": 6,
+    "et_al": "et al.",
+    "journal_title_case": "abbreviated_or_as_provided",
+    "notes": "Numbered bracket citations; reference list order follows citation order."
+  },
+  {
+    "key": "nature",
+    "display_name": "Nature",
+    "citation_mode": "numeric-superscript",
+    "csl_file": "nature.csl",
+    "source": "Nature formatting guide and CSL official style",
+    "max_authors_before_et_al": 5,
+    "et_al": "et al.",
+    "journal_title_case": "abbreviated_or_as_provided",
+    "notes": "Nature asks for all authors unless more than five, then first author plus et al."
+  },
+  {
+    "key": "science",
+    "display_name": "Science",
+    "citation_mode": "numeric",
+    "csl_file": "science.csl",
+    "source": "Science information for authors and CSL official style",
+    "max_authors_before_et_al": 10,
+    "et_al": "et al.",
+    "journal_title_case": "abbreviated_or_as_provided",
+    "notes": "Science research articles commonly allow about 50 main-text references."
+  },
+  {
+    "key": "cell",
+    "display_name": "Cell",
+    "citation_mode": "author-date",
+    "csl_file": "cell.csl",
+    "source": "Cell information for authors and CSL official style",
+    "max_authors_before_et_al": 10,
+    "et_al": "et al.",
+    "journal_title_case": "abbreviated_or_as_provided",
+    "notes": "Cell Press commonly uses author-date references."
+  },
+  {
+    "key": "elsevier-vancouver",
+    "display_name": "Elsevier Vancouver",
+    "citation_mode": "numeric",
+    "csl_file": "elsevier-vancouver.csl",
+    "source": "Elsevier author policies and CSL official style",
+    "max_authors_before_et_al": 6,
+    "et_al": "et al.",
+    "journal_title_case": "abbreviated_or_as_provided",
+    "notes": "Common biomedical Elsevier numeric profile."
+  },
+  {
+    "key": "elsevier-harvard",
+    "display_name": "Elsevier Harvard",
+    "citation_mode": "author-date",
+    "csl_file": "elsevier-harvard.csl",
+    "source": "Elsevier author policies and CSL official style",
+    "max_authors_before_et_al": 6,
+    "et_al": "et al.",
+    "journal_title_case": "as_provided",
+    "notes": "Common Elsevier author-date profile."
+  },
+  {
+    "key": "springer-vancouver",
+    "display_name": "Springer Vancouver",
+    "citation_mode": "numeric",
+    "csl_file": "springer-vancouver.csl",
+    "source": "Springer author guidance and CSL official style",
+    "max_authors_before_et_al": 6,
+    "et_al": "et al.",
+    "journal_title_case": "abbreviated_or_as_provided",
+    "notes": "Springer Nature journal-specific rules still override this profile."
+  },
+  {
+    "key": "acm",
+    "display_name": "ACM",
+    "citation_mode": "numeric",
+    "csl_file": "association-for-computing-machinery.csl",
+    "source": "ACM reference formatting page and CSL official style",
+    "max_authors_before_et_al": 6,
+    "et_al": "et al.",
+    "journal_title_case": "as_provided",
+    "notes": "Use for ACM computing manuscripts when a venue does not provide stricter rules."
+  },
+  {
+    "key": "acs",
+    "display_name": "American Chemical Society",
+    "citation_mode": "numeric",
+    "csl_file": "american-chemical-society.csl",
+    "source": "ACS Publishing Center and CSL official style",
+    "max_authors_before_et_al": 10,
+    "et_al": "et al.",
+    "journal_title_case": "abbreviated_or_as_provided",
+    "notes": "Chemistry-focused style profile."
+  },
+  {
+    "key": "ama",
+    "display_name": "American Medical Association",
+    "citation_mode": "numeric",
+    "csl_file": "american-medical-association.csl",
+    "source": "CSL official style",
+    "max_authors_before_et_al": 6,
+    "et_al": "et al.",
+    "journal_title_case": "abbreviated_or_as_provided",
+    "notes": "Medical journal numeric profile."
+  },
+  {
+    "key": "bmj",
+    "display_name": "BMJ",
+    "citation_mode": "numeric",
+    "csl_file": "bmj.csl",
+    "source": "CSL official style",
+    "max_authors_before_et_al": 6,
+    "et_al": "et al.",
+    "journal_title_case": "abbreviated_or_as_provided",
+    "notes": "BMJ profile from CSL."
+  },
+  {
+    "key": "nejm",
+    "display_name": "New England Journal of Medicine",
+    "citation_mode": "numeric",
+    "csl_file": "the-new-england-journal-of-medicine.csl",
+    "source": "NEJM author center and CSL official style",
+    "max_authors_before_et_al": 6,
+    "et_al": "et al.",
+    "journal_title_case": "abbreviated_or_as_provided",
+    "notes": "Major medical journal profile."
+  },
+  {
+    "key": "apa",
+    "display_name": "APA 7th",
+    "citation_mode": "author-date",
+    "csl_file": "apa.csl",
+    "source": "CSL official style",
+    "max_authors_before_et_al": 20,
+    "et_al": "et al.",
+    "journal_title_case": "as_provided",
+    "notes": "Useful for education, psychology, and social-science manuscripts."
+  },
+  {
+    "key": "acta-physica-sinica",
+    "display_name": "Acta Physica Sinica",
+    "citation_mode": "numeric",
+    "csl_file": "acta-physica-sinica.csl",
+    "source": "CSL official style",
+    "max_authors_before_et_al": 3,
+    "et_al": "等",
+    "journal_title_case": "as_provided",
+    "notes": "Domestic Chinese journal profile available in CSL."
+  },
+  {
+    "key": "chinese-medical-journal",
+    "display_name": "Chinese Medical Journal",
+    "citation_mode": "numeric",
+    "csl_file": "chinese-medical-journal.csl",
+    "source": "CSL official style",
+    "max_authors_before_et_al": 6,
+    "et_al": "et al.",
+    "journal_title_case": "abbreviated_or_as_provided",
+    "notes": "Domestic/China-linked medical journal profile available in CSL."
+  }
+]

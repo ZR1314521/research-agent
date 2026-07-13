@@ -1,0 +1,4 @@
+interface:
+  display_name: "Recursive Search Controller"
+  short_description: "Run bounded query expansion and repeated paper retrieval."
+  default_prompt: "Use $recursive-search-controller for this research task."

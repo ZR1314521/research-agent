@@ -1,0 +1,285 @@
+{
+  "version": 1,
+  "skills": [
+    {
+      "name": "workflow-state-manager",
+      "kind": "internal",
+      "handler": "workflow_state",
+      "planner_visible": false,
+      "description": "Persist session state, checkpoints, artifacts, decisions, and events."
+    },
+    {
+      "name": "academic-search-multisource",
+      "kind": "tool",
+      "handler": "search_literature",
+      "planner_visible": true,
+      "description": "Search multiple scholarly sources, normalize results, screen them, and create a paper pool.",
+      "network_access": true
+    },
+    {
+      "name": "literature-screening",
+      "kind": "tool",
+      "handler": "screen_papers",
+      "planner_visible": true,
+      "description": "Deduplicate and filter the active paper pool with transparent relevance reasons."
+    },
+    {
+      "name": "literature-matrix-extraction",
+      "kind": "tool",
+      "handler": "summarize_papers",
+      "planner_visible": true,
+      "description": "Summarize active papers and build a grounded evidence matrix."
+    },
+    {
+      "name": "experiment-data-analysis",
+      "kind": "tool",
+      "handler": "analyze_experiment",
+      "planner_visible": true,
+      "description": "Analyze CSV, TSV, XLSX, or text experiment data."
+    },
+    {
+      "name": "data-transform",
+      "kind": "tool",
+      "handler": "transform_data",
+      "planner_visible": true,
+      "description": "Transform experiment data by normalizing, filtering missing rows, keeping columns, and saving a new file."
+    },
+    {
+      "name": "reference-format-gbt7714",
+      "kind": "tool",
+      "handler": "format_references",
+      "planner_visible": true,
+      "description": "Format references in Nature, IEEE, APA, ACS, GB/T 7714, and 14 other journal styles. Accepts DOCX, JSON, BibTeX, or RIS input and produces a formatted Word document.",
+      "direct_delivery": true
+    },
+    {
+      "name": "systematic-literature-review",
+      "kind": "tool",
+      "handler": "write_review",
+      "planner_visible": true,
+      "description": "Generate a grounded review outline or draft from the active paper pool."
+    },
+    {
+      "name": "read-arxiv-paper",
+      "kind": "tool",
+      "handler": "read_arxiv",
+      "planner_visible": true,
+      "description": "Read one arXiv paper from a URL or identifier."
+    },
+    {
+      "name": "20-ml-paper-writing",
+      "kind": "prompt",
+      "handler": "write_paper_section",
+      "planner_visible": true,
+      "description": "Draft evidence-backed ML paper sections from session artifacts."
+    },
+    {
+      "name": "docx",
+      "kind": "tool",
+      "handler": "export_docx",
+      "planner_visible": true,
+      "description": "Export a Markdown file to a Word document (.docx). Not for reading or converting DOCX files.",
+      "write_access": true,
+      "requires_confirmation": true
+    },
+    {
+      "name": "document-convert",
+      "kind": "tool",
+      "handler": "document_convert",
+      "planner_visible": true,
+      "description": "Convert DOCX to Markdown or Markdown to DOCX with imported source, media extraction, and a fidelity report.",
+      "write_access": true,
+      "direct_delivery": true
+    },
+    {
+      "name": "document-summary",
+      "kind": "tool",
+      "handler": "document_summary",
+      "planner_visible": true,
+      "description": "Explain an explicitly supplied DOCX or Markdown document in Chinese, save a grounded summary artifact, and return the summary directly.",
+      "write_access": true,
+      "direct_delivery": true
+    },
+    {
+      "name": "doc-coauthoring",
+      "kind": "prompt",
+      "handler": "revise_document",
+      "planner_visible": true,
+      "description": "Revise an existing research artifact from user feedback."
+    },
+    {
+      "name": "humanizer",
+      "kind": "prompt",
+      "handler": "humanize_text",
+      "planner_visible": true,
+      "description": "Edit research prose to remove formulaic model language."
+    },
+    {
+      "name": "canvas-design",
+      "kind": "prompt",
+      "handler": "design_visual",
+      "planner_visible": true,
+      "description": "Create a specification for a research diagram or visual asset."
+    },
+    {
+      "name": "literature-search-openalex",
+      "kind": "source",
+      "handler": "search_openalex",
+      "planner_visible": true,
+      "description": "Search OpenAlex only.",
+      "network_access": true
+    },
+    {
+      "name": "pubmed-database",
+      "kind": "source",
+      "handler": "search_pubmed",
+      "planner_visible": true,
+      "description": "Search PubMed only.",
+      "network_access": true
+    },
+    {
+      "name": "semanticscholar-skill",
+      "kind": "source",
+      "handler": "search_semantic_scholar",
+      "planner_visible": true,
+      "description": "Search Semantic Scholar only.",
+      "network_access": true
+    },
+    {
+      "name": "langgraph-human-in-the-loop",
+      "kind": "internal",
+      "handler": null,
+      "planner_visible": false,
+      "description": "Human approval and resume design guidance implemented by local sessions."
+    },
+    {
+      "name": "workflow-orchestration-patterns",
+      "kind": "internal",
+      "handler": null,
+      "planner_visible": false,
+      "description": "Bounded workflow and retry design guidance."
+    },
+    {
+      "name": "file-upload-router",
+      "kind": "tool",
+      "handler": "register_files",
+      "planner_visible": false,
+      "description": "Register and route local research files.",
+      "write_access": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "paths": {"type": "array", "items": {"type": "string"}},
+          "path": {"type": "string"}
+        },
+        "required_any_of": ["paths", "path"]
+      }
+    },
+    {
+      "name": "workflow-visualizer-dashboard",
+      "kind": "internal",
+      "handler": "session_status",
+      "planner_visible": false,
+      "description": "Render terminal status and structured workflow traces."
+    },
+    {
+      "name": "rag-vector-knowledge-base",
+      "kind": "tool",
+      "handler": "rag_query",
+      "planner_visible": true,
+      "description": "Build or query a local sparse TF-IDF research index."
+    },
+    {
+      "name": "recursive-search-controller",
+      "kind": "internal",
+      "handler": "search_literature",
+      "planner_visible": false,
+      "description": "Bound repeated API search and query expansion to three rounds."
+    },
+    {
+      "name": "gbt7714-strict-rules",
+      "kind": "internal",
+      "handler": "format_references",
+      "planner_visible": false,
+      "description": "Local GB/T 7714 profiles, validation rules, and CSL evidence."
+    },
+    {
+      "name": "model-call-logger",
+      "kind": "internal",
+      "handler": null,
+      "planner_visible": false,
+      "description": "Sanitized append-only model call logging."
+    },
+    {
+      "name": "quality-audit",
+      "kind": "tool",
+      "handler": "quality_audit",
+      "planner_visible": true,
+      "description": "Explain request counts, source failures, screening counts, stop reasons, and relevant logs.",
+      "direct_delivery": true
+    },
+    {
+      "name": "workspace-files",
+      "kind": "tool",
+      "handler": "workspace_files",
+      "planner_visible": true,
+      "description": "Safely list, read, search, copy, move, write, or reversibly delete files inside this workspace.",
+      "write_access": true,
+      "requires_confirmation": true
+    },
+    {
+      "name": "open-access-paper-download",
+      "kind": "tool",
+      "handler": "acquire_open_access_papers",
+      "planner_visible": true,
+      "description": "Download only verified open-access PDF URLs from the active paper pool and preserve a provenance manifest.",
+      "network_access": true,
+      "write_access": true
+    },
+    {
+      "name": "open-access-reading-copy",
+      "kind": "tool",
+      "handler": "create_reading_copy",
+      "planner_visible": true,
+      "description": "Create a clearly labelled reading-copy DOCX from downloaded open-access PDFs; it is never presented as publisher Word.",
+      "write_access": true
+    },
+    {
+      "name": "web-search",
+      "kind": "tool",
+      "handler": "web_search",
+      "planner_visible": true,
+      "description": "Search the public web via opencli for journal guidelines, conference details, formatting rules, software docs, and any non-academic reference material. Returns titles, URLs, and snippets.",
+      "network_access": true
+    },
+    {
+      "name": "run-code",
+      "kind": "tool",
+      "handler": "run_code",
+      "planner_visible": true,
+      "description": "Execute Python code for data analysis, statistical tests, scientific computing, plotting, and any custom computation. Returns stdout, stderr, and exit code."
+    },
+    {
+      "name": "web-fetch",
+      "kind": "tool",
+      "handler": "web_fetch",
+      "planner_visible": true,
+      "description": "Fetch content from a URL. Saves PDFs to disk, returns text for web pages. Use to download papers from direct links or read full web page content.",
+      "network_access": true
+    },
+    {
+      "name": "git",
+      "kind": "tool",
+      "handler": "git",
+      "planner_visible": true,
+      "description": "Version control with git. Run init, add, commit, log, diff, status, checkout, branch in the working directory."
+    },
+    {
+      "name": "shell",
+      "kind": "tool",
+      "handler": "shell",
+      "planner_visible": true,
+      "description": "Run a shell command and return stdout, stderr, and exit code. Use for system tasks, file operations, or any CLI tool."
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Model Call Logger"
+  short_description: "Log sanitized model calls, latency, status, and errors."
+  default_prompt: "Use $model-call-logger for this research task."

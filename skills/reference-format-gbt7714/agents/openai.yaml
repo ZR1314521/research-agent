@@ -1,0 +1,4 @@
+interface:
+  display_name: "Reference Format GB/T 7714"
+  short_description: "Validate and format references in GB/T 7714 and journal styles."
+  default_prompt: "Use $reference-format-gbt7714 for this research task."

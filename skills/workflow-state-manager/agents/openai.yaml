@@ -1,0 +1,4 @@
+interface:
+  display_name: "Workflow State Manager"
+  short_description: "Persist sessions, checkpoints, artifacts, and execution state."
+  default_prompt: "Use $workflow-state-manager for this research task."

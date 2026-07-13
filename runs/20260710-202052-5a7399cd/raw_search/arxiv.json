@@ -1,0 +1,402 @@
+[
+  {
+    "title": "Geometry and Gradient-based Partitioning for Panoramic Outdoor Reconstruction",
+    "authors": [
+      "Weijian Chen",
+      "Weibo Yao",
+      "Yuhang Zhang",
+      "Xiaolin Tang",
+      "Guo Wang",
+      "Weijun Zhang",
+      "Xitong Gao",
+      "Yihao Chen",
+      "Hongde Qin",
+      "Lu Qi"
+    ],
+    "year": 2026,
+    "venue": "arXiv",
+    "abstract": "Scaling 3D Gaussian Splatting (3DGS) to large outdoor scenes is costly in both data acquisition and computation. Adopting panoramic images with equirectangular projection (ERP) can reduce capture effort via their full $360^{\\circ}$ field of view, yet the resulting omnipresent visibility invalidates existing partitioning strategies that rely on local camera frustums, causing block-wise optimization to degenerate into global training. Thus, we propose PanoLOG, a two-stage coarse-to-fine framework equipped with a Geometry and Gradient-based Partitioning Strategy tailored for large-scale panoramic 3DGS reconstruction. In the global coarse stage, PanoLOG leverages sky-sphere modeling and panoramic monocular depth supervision for reliable geometry, while in the refinement stage, G$^2$PS builds adaptive bounding volumes via parallax-driven uncertainty and assigns cameras via gradient-based importance scoring. Furthermore, we construct Pano360, the first benchmark on large-scale panoramic dataset for outdoor scene reconstruction. Extensive experiments demonstrate that G$^2$PS achieves state-of-the-art rendering quality while maintaining scalable, block-parallel training. Our models, training code, and dataset are publicly available.",
+    "doi": "",
+    "url": "http://arxiv.org/abs/2607.08769v1",
+    "source": "arxiv",
+    "raw_metadata": {
+      "published": "2026-07-09T17:59:43Z"
+    }
+  },
+  {
+    "title": "UniClawBench: A Universal Benchmark for Proactive Agents on Real-World Tasks",
+    "authors": [
+      "Zhekai Chen",
+      "Chengqi Duan",
+      "Kaiyue Sun",
+      "Bohao Li",
+      "Yuqing Wang",
+      "Manyuan Zhang",
+      "Xihui Liu"
+    ],
+    "year": 2026,
+    "venue": "arXiv",
+    "abstract": "The rapid development of large language models and multimodal large language models has accelerated the emergence of proactive agents capable of operating everyday tools and assisting users in real-world environments. However, existing benchmarks struggle to evaluate such agents effectively, as they often rely on sandboxed environments and single-turn evaluation paradigms. Moreover, their scenario-based task taxonomies mix multiple model capabilities within the same task category, making it difficult to identify the root causes of agent failures. To address these limitations, we introduce UniClawBench, the first capability-driven benchmark designed to evaluate proactive agents in dynamic, real-world settings. UniClawBench is built around five foundational model capabilities: Skill Usage, Exploration, Long-Context Reasoning, Multimodal Understanding, and Cross-Platform Coordination. Based on these capabilities, we design 400 bilingual real-world tasks. Unlike previous benchmarks that rely on static, pre-recorded answers, our benchmark evaluates agents in live Docker containers using fine-grained, step-by-step completion checkpoints. Furthermore, we design a closed-loop evaluation strategy comprising an executor agent, a hidden supervisor agent, and a user agent to simulate realistic multi-turn human feedback without leaking grading criteria. To disentangle base model capabilities from framework-level design choices, we evaluate state-of-the-art models under multiple agent frameworks. Through comprehensive comparisons across both models and frameworks, we show how base model capabilities and agent framework designs jointly shape performance in real-world environments. To facilitate future research, we make our benchmark and code publicly available at https://github.com/HKU-MMLab/UniClawBench.",
+    "doi": "",
+    "url": "http://arxiv.org/abs/2607.08768v1",
+    "source": "arxiv",
+    "raw_metadata": {
+      "published": "2026-07-09T17:59:32Z"
+    }
+  },
+  {
+    "title": "OPSD-V: On-Policy Self-Distillation for Post-Training Few-Step Autoregressive Video Generators",
+    "authors": [
+      "Hongyu Liu",
+      "Chun Wang",
+      "Feng Gao",
+      "Xuanhua He",
+      "Yue Ma",
+      "Ziyu Wan",
+      "Yong Zhang",
+      "Xiaoming Wei",
+      "Qifeng Chen"
+    ],
+    "year": 2026,
+    "venue": "arXiv",
+    "abstract": "We propose OPSD-V, an on-policy self-distillation paradigm for post-training few-step autoregressive (AR) video diffusion models. Existing few-step AR video generators can produce long videos with low latency, but still suffer from error accumulation and weakened motion dynamics during long autoregressive rollout. OPSD-V reduces long-horizon degradation while preserving the original few-step inference path. The key idea is to introduce real long-video data as temporal context during training and use it to provide dense trajectory-level supervision. Specifically, the student follows the exact inference-time rollout, generating each chunk conditioned on its own previously generated KV cache. In parallel, the teacher is evaluated at the same student-visited denoising states, but uses a cleaner AR-consistent temporal cache in which older history can be replaced by real-video context. This provides dense denoising-level corrective targets under on-policy AR cache dynamics, without changing the sampler, number of denoising steps, or inference-time cache mechanism. We apply OPSD-V to representative few-step AR video models, including Self-Forcing and LongLive. Experiments show consistent improvements in visual quality, motion dynamics, and VBenchLong scores. A user study with 10 participants comparing 20 video pairs shows that OPSD-V is preferred over the base models in 66.0% of overall-preference judgments (82.5% excluding ties).",
+    "doi": "",
+    "url": "http://arxiv.org/abs/2607.08766v1",
+    "source": "arxiv",
+    "raw_metadata": {
+      "published": "2026-07-09T17:59:11Z"
+    }
+  },
+  {
+    "title": "OpenCoF: Learning to Reason Through Video Generation",
+    "authors": [
+      "Xinyan Chen",
+      "Ziyu Guo",
+      "Renrui Zhang",
+      "Dongzhi Jiang",
+      "Hongsheng Li"
+    ],
+    "year": 2026,
+    "venue": "arXiv",
+    "abstract": "Reasoning has become a core capability for large models, especially when reliable decisions require understanding logical consequences. Recent video generation models offer a reasoning path distinct from previous Chain-of-Thought (CoT): reasoning can unfold through temporally connected frames, known as Chain-of-Frame (CoF) reasoning. However, existing video generators are primarily trained on general video corpora, still lacking diverse supervision and dedicated designs for CoF reasoning. To address this gap, we introduce OpenCoF, a framework comprising the OpenCoF-17K dataset, a reasoning video dataset spanning 11 task families, and Wan-CoF, a fine-tuned video model for studying whether diverse temporal supervision improves CoF behavior. Across four video reasoning benchmarks, Wan-CoF achieves considerable gains over the Wan2.2-I2V-A14B baseline. Building on this, we empirically explore more advanced designs for CoF capabilities, i.e., equipping the model with visual and textual reasoning tokens. This mechanism respectively captures low-level visual cues and high-level semantic priors for spatial and temporal reasoning. Through performance comparisons and attention analysis, we examine how these tokens contribute across model depth, denoising steps, space, and time. Our results suggest that stronger video reasoning requires both broad temporal supervision and explicit mechanisms for organizing intermediate reasoning state. We open-source the dataset, model, and code to facilitate future research on reasoning-oriented video generation.",
+    "doi": "",
+    "url": "http://arxiv.org/abs/2607.08763v1",
+    "source": "arxiv",
+    "raw_metadata": {
+      "published": "2026-07-09T17:58:29Z"
+    }
+  },
+  {
+    "title": "Measuring Consumption with Credit Card Data: Benchmarking and Beyond",
+    "authors": [
+      "Aditya Aladangady",
+      "Ricardo Duque Gabriel",
+      "Carlo Wix"
+    ],
+    "year": 2026,
+    "venue": "arXiv",
+    "abstract": "We introduce a novel monthly county-level consumption dataset constructed from spending data on over 350 million credit cards in the Federal Reserve's Y-14M reports, covering over 3,000 U.S. counties since 2014. We first show that the data closely approximate traditional consumption measures, explaining 92 percent of the variation in monthly adjusted personal consumption expenditures (PCE) growth at the national level and capturing meaningful cross-sectional variation in annual adjusted PCE growth at the state level. As a proof of concept, we use the county-month panel to estimate heterogeneous consumption responses to monetary policy shocks across the county-level income distribution, an analysis infeasible with traditional consumption data. We find that low-income counties exhibit larger spending declines than high-income counties, consistent with heterogeneous agent New Keynesian models. Finally, we provide practical guidance for researchers working with similar data, discussing coverage, sample composition, and the approximation of credit card spending from credit bureau data.",
+    "doi": "",
+    "url": "http://arxiv.org/abs/2607.08759v1",
+    "source": "arxiv",
+    "raw_metadata": {
+      "published": "2026-07-09T17:56:12Z"
+    }
+  },
+  {
+    "title": "Ideas Have Genomes: Benchmarking Scientific Lineage Reasoning and Lineage-Grounded Idea Generation",
+    "authors": [
+      "Yifan Zhou",
+      "Qihao Yang",
+      "Yan Li",
+      "Donggang Li",
+      "Xiru Hu",
+      "Hokin Deng",
+      "Ziyang Gong",
+      "Xuanyi Zhou",
+      "Huacan Wang",
+      "Xiangchao Yan",
+      "Wanghan Xu",
+      "Wenlong Zhang",
+      "Shaofeng Zhang",
+      "Yue Zhou",
+      "Yifan Yang",
+      "Zhihang Zhong",
+      "Xue Yang"
+    ],
+    "year": 2026,
+    "venue": "arXiv",
+    "abstract": "Scientific ideas rarely start from a blank page. They inherit mechanisms, repair known limitations, and recombine pieces of earlier work, much like biological genomes. Current benchmarks still say little about whether AI systems can follow this inheritance structure. We present IdeaGene-Bench (IG-Bench), a benchmark for scientific lineage reasoning and lineage-grounded idea generation. IG-Bench is organized around the IdeaGene framework: each paper or proposal is represented as a set of minimal, typed, evidence-grounded Idea Genome objects, and a GenomeDiff aligns these objects to record inheritance, mutation, loss, external import, and novel insertion under six operational evolutionary dynamics. The benchmark contains 1,961 golden lineage traces, 1,085 curated Idea Genome objects, and 920 pairwise GenomeDiff records across 10 scientific domains. It supports two evaluations. IG-Exam (42 task types, 1,029 instances) tests closed-form lineage reasoning across Idea Genome abstraction, inheritance tracing, evolutionary reasoning, and lineage verification. IG-Arena evaluates generation with a lineage-conditioned Population-Evolution Score(PES), asking whether a proposal can be inserted as a coherent descendant of a given lineage population: it should inherit the right Idea Genome objects, vary meaningfully from nearby work, and offer selection value for future research. Experiments on 14 LLM-based scientists expose a compositional bottleneck. The strongest system reaches only 27.3% exact accuracy on lineage reasoning, and structured lineage context reshuffles system rankings rather than helping every participant uniformly.",
+    "doi": "",
+    "url": "http://arxiv.org/abs/2607.08758v1",
+    "source": "arxiv",
+    "raw_metadata": {
+      "published": "2026-07-09T17:55:53Z"
+    }
+  },
+  {
+    "title": "DegenDetector: Symbolic Recovery of Parameter Degeneracies in Bayesian Posteriors",
+    "authors": [
+      "Chaipat Tirapongprasert",
+      "Matthew Ho"
+    ],
+    "year": 2026,
+    "venue": "arXiv",
+    "abstract": "We introduce DegenDetector, a framework for identifying and characterizing parameter degeneracies in posterior distributions as closed-form symbolic equations. By combining mutual information screening with alternating symbolic regression, we facilitate automated and interpretable identification of degenerate relationships without domain-specific input. While standard tools such as corner plots can indicate that correlations exist, they do not reveal the underlying functional form. DegenDetector fills this gap by expressing multi-parameter degeneracies as closed-form equations, providing interpretable structure that scales to high-order parameter spaces.",
+    "doi": "",
+    "url": "http://arxiv.org/abs/2607.08755v1",
+    "source": "arxiv",
+    "raw_metadata": {
+      "published": "2026-07-09T17:54:08Z"
+    }
+  },
+  {
+    "title": "Using AI-based Learning Assistants in Higher Education: A Large-Scale Descriptive Analysis",
+    "authors": [
+      "Kristina Schaaff",
+      "Quintus Stierstorfer",
+      "Valerie Heckel"
+    ],
+    "year": 2026,
+    "venue": "arXiv",
+    "abstract": "In this study, we present a large-scale descriptive analysis of the use of an AI-based learning assistant (Syntea) in higher education. Based on objective log data from 77,543 students enrolled in distance studies, we examine usage patterns across gender, age group, study cluster, degree, and study mode. To date, existing research on educational chatbots has largely relied on comparatively small samples and self-reported survey data, while large-scale evidence on actual usage behavior remains limited. Our findings show that Syntea is already embedded in the study routines of many learners, but that usage differs across demographic and structural contexts. By identifying these patterns, our study provides an empirical basis for the further development of AI-based learning support and contributes a large-scale analysis of educational chatbot usage in higher education.",
+    "doi": "",
+    "url": "http://arxiv.org/abs/2607.08748v1",
+    "source": "arxiv",
+    "raw_metadata": {
+      "published": "2026-07-09T17:49:14Z"
+    }
+  },
+  {
+    "title": "Remember When It Matters: Proactive Memory Agent for Long-Horizon Agents",
+    "authors": [
+      "Yifan Wu",
+      "Lizhu Zhang",
+      "Yuhang Zhou",
+      "Mingyi Wang",
+      "Bo Peng",
+      "Serena Li",
+      "Xiangjun Fan",
+      "Zhuokai Zhao"
+    ],
+    "year": 2026,
+    "venue": "arXiv",
+    "abstract": "In long-horizon tasks, decision-relevant state is often scattered across an expanding trajectory, while the action agent must surface it and act. As trajectories grow, task requirements, environment facts, prior attempts, diagnoses, and open subgoals can be buried in the context window or pushed beyond it, failing to influence decisions when needed. We call this failure mode \"behavioral state decay\". We study memory as an active intervention mechanism rather than passive retrieval. A separate memory agent runs alongside an unmodified action agent, updating a structured memory bank from the recent trajectory and deciding whether to inject a memory-grounded reminder or remain silent. The module is plug-and-play with frontier action agents and existing agent harnesses. Across Terminal-Bench 2.0 and $τ^2$-Bench, it improves pass@1 for both weaker and stronger action agents, with gains of +8.3 pp on Terminal-Bench and +6.8 pp on $τ^2$-Bench. Ablations show that selective intervention outperforms passive bank exposure, always-on injection, advisor-only guidance, and general retrieval. As an early step toward open-weight memory policies, we train Qwen3.5-27B on SETA using SFT and GRPO, improving validation reward and achieving partial transfer to Terminal-Bench.",
+    "doi": "",
+    "url": "http://arxiv.org/abs/2607.08716v1",
+    "source": "arxiv",
+    "raw_metadata": {
+      "published": "2026-07-09T17:26:28Z"
+    }
+  },
+  {
+    "title": "Directional AI Advice: Experimental Evidence from Healthcare",
+    "authors": [
+      "Yuyu Chen",
+      "Hongbin Li",
+      "Lingsheng Meng",
+      "Xinyao Qiu",
+      "Qingxu Yang"
+    ],
+    "year": 2026,
+    "venue": "arXiv",
+    "abstract": "Generative AI is fast becoming the first place people turn for expert advice. The advice it provides can be directional rather than neutral, shaped in part by the choices of its designers and regulators. When clients consult AI before meeting an expert, they carry this directional advice into a relationship that once rested on the expert's judgment alone. We study its consequences in healthcare through a large-scale preregistered field experiment at a Chinese hospital, where we randomize patients' access to an AI chatbot before their outpatient visit. Examination of the conversation logs shows that the chatbot routinely cautions against the use of medications, especially Traditional Chinese Medicine and antibiotics, while issuing clean recommendations for diagnostic testing, consistent with the liability-driven guardrails encoded in AI training. This directionality propagates into clinical practice. Prescription rates decline among treated patients while diagnostic testing increases, and these effects are more pronounced among physicians who are receptive to patient input and those with more intensive prescribing styles. Beyond shifting healthcare utilization, survey results show that AI access reduces patient compliance and satisfaction, shifting the balance of authority between patients and physicians.",
+    "doi": "",
+    "url": "http://arxiv.org/abs/2607.08706v1",
+    "source": "arxiv",
+    "raw_metadata": {
+      "published": "2026-07-09T17:14:20Z"
+    }
+  },
+  {
+    "title": "HumanForge: A Human-Centric Deepfake Video Benchmark with Multi-Agent Forgery Rationales",
+    "authors": [
+      "Wenbo Xu",
+      "Zhimin Chen",
+      "Xiaojie Liang",
+      "Hengrui Liu",
+      "Wei Lu"
+    ],
+    "year": 2026,
+    "venue": "arXiv",
+    "abstract": "Rapid advancements in video diffusion models and temporal editing tools have enabled the generation of highly realistic human-centric videos, posing unprecedented challenges to digital content forensics. Existing benchmarks primarily focus on either face-swapping or global text-to-video synthesis, overlooking the crucial dimensions of human-object or human-human interactions and multi-modal alignment. To address these limitations, we introduce HumanForge, a unified, large-scale, and multi-paradigm human-centric video forgery dataset. To construct and annotate this dataset without labor-intensive manual labeling or hallucinated monolithic prompts, we propose Gen2Anno, a modular active multi-agent pipeline built on LangGraph. Gen2Anno coordinates six specialized agents-ranging from source profiling to MoE-based reference analysis and closed-loop forensic verification-to generate over 18K high-fidelity video segments and produce structured, contrastive omni-annotations containing binary decisions, fine-grained artifact categories, and spatio-temporal localization. Extensive benchmarks using state-of-the-art traditional detectors and Large Multimodal Models (LMMs) demonstrate the significant challenges of zero-shot generalization and fine-grained reasoning on HumanForge. Code and dataset will be publicly released.",
+    "doi": "",
+    "url": "http://arxiv.org/abs/2607.08705v1",
+    "source": "arxiv",
+    "raw_metadata": {
+      "published": "2026-07-09T17:12:41Z"
+    }
+  },
+  {
+    "title": "MPFlow: Learning Budgeted Max-Flow Optimization on the Lightning Network with Deep Graph Reinforcement Learning",
+    "authors": [
+      "Harrison Rush",
+      "Vincent Davis",
+      "Simone Antonelli",
+      "Vikash Singh",
+      "Jesse Shrader",
+      "Emanuele Rossi"
+    ],
+    "year": 2026,
+    "venue": "arXiv",
+    "abstract": "We address liquidity placement in the Bitcoin Lightning Network (LN): given a fixed budget, which channels should a node open to maximize its routing capacity? We cast this as a budget-constrained combinatorial optimization problem on graphs, selecting $k$ edge additions that maximize $s$--$t$ max-flow, a theory-grounded measure of routing capacity, and solve it with graph reinforcement learning. Our lightweight agent combines a message-passing policy network with proximal policy optimization (PPO) and action masking, and is trained under a hub-exclusion curriculum: the network's top hubs are removed from training subgraphs, forcing the policy to learn capacity-aware placement rather than hub attachment. In extensive experiments on real Lightning Network snapshots, our method consistently outperforms strong heuristic baselines on the max-flow objective across multiple seeds and unseen graphs. The agent has been deployed in production for peer recommendations, executing 4640 channel-open decisions that cumulatively allocate 267.3 BTC over $16 million across 30 managed nodes.",
+    "doi": "",
+    "url": "http://arxiv.org/abs/2607.08703v1",
+    "source": "arxiv",
+    "raw_metadata": {
+      "published": "2026-07-09T17:09:20Z"
+    }
+  },
+  {
+    "title": "Do You Need a Frontier Model as a Citation Verifier? Benchmarking Rubric LLMs for Deep-Research Source Attribution",
+    "authors": [
+      "Ethan Leung",
+      "Elias Lumer",
+      "Corey Feld",
+      "Austin Huber",
+      "Vamse Kumar Subbiah",
+      "Kevin Paul"
+    ],
+    "year": 2026,
+    "venue": "arXiv",
+    "abstract": "Reinforcement learning increasingly relies on an LLM judge to score each rubric criterion, and that judge acts as the reward model during training. Before such a signal can be trusted, we need to know how capable the judge must be and how biased it is. We study this calibration question for citation quality in deep-research systems, where a search-grounded LLM must support each claim it writes with a cited source. Citation quality is a structured rubric task in which each attribution-citation pair is judged along two dimensions that require an LLM, source relevance and factual support. On an adversarial long-form benchmark, we score 8 off-the-shelf LLM judges from 3 model families against gold labels over 1,248 rubric decisions, all of which were human-reviewed and 378 of which were hard cases adjudicated from judge disagreements. Cheaper judges remain competitive across both dimensions, with GPT-5-mini attaining the strongest source-relevance pass-class F1 at 0.908 ($κ$=0.636), while on factual support the judges are statistically indistinguishable (overlapping confidence intervals), so no single model dominates. At comparable F1, the judges still differ substantially in pass-rate drift, false positive rate, and false negative rate. Scalar F1 obscures this directional bias, yet it is exactly what a downstream reinforcement learning loop would reinforce. Calibrating the judge is therefore a prerequisite for using citation rubrics as reward signals, and our results show that this calibration does not require the most expensive available model.",
+    "doi": "",
+    "url": "http://arxiv.org/abs/2607.08700v1",
+    "source": "arxiv",
+    "raw_metadata": {
+      "published": "2026-07-09T17:01:40Z"
+    }
+  },
+  {
+    "title": "How YouTube Frames ChatGPT Use in Education: An Epistemic Network Analysis with Supporting Multimodal Metadata",
+    "authors": [
+      "Shayla Sharmin",
+      "Mohammad Al-Ratrout",
+      "Mohammad Fahim Abrar",
+      "Roghayeh Leila Barmaki"
+    ],
+    "year": 2026,
+    "venue": "arXiv",
+    "abstract": "We examine educational YouTube videos through multimodal metadata, such as transcripts, titles, thumbnails, and viewer comments, to investigate how ChatGPT is framed across creator groups and how those framings relate to audience response and platform reach. Little is known about how large language models are presented to learners in informal, creator-driven public discourse. Following PRISMA, we selected 52 videos for analysis. We identified three structurally distinct discourse groups: (G1) videos that positioned ChatGPT as a conceptual scaffold for thinking, (G2) videos oriented toward retrieval practice and skill-building, and (G3) videos that framed ChatGPT as a tool for output generation. Epistemic Network Analysis revealed statistically significant group differences with large effect sizes. Multimodal metadata consistently reflected these distinctions across transcript discourse, titles, and thumbnails. Viewers of learning-oriented content described ChatGPT as a thinking partner or tutor, whereas viewers of output-oriented content raised concerns about over-reliance, surface-level learning, and cognitive offloading. G3 achieved comparable platform reach to G2, yet with substantially weaker learning-oriented framing. This may suggest that output-oriented content competes for visibility despite lower pedagogical depth. These findings reveal a structural tension in self-directed AI learning: content that prioritizes quick outputs reaches far more learners than content that promotes deep engagement. This gap raises critical questions about whose vision of AI literacy scales and what learners are actually left with.",
+    "doi": "",
+    "url": "http://arxiv.org/abs/2607.08698v1",
+    "source": "arxiv",
+    "raw_metadata": {
+      "published": "2026-07-09T16:55:46Z"
+    }
+  },
+  {
+    "title": "Artificial Persons",
+    "authors": [
+      "Ned Howells-Whitaker",
+      "Seth Lazar"
+    ],
+    "year": 2026,
+    "venue": "arXiv",
+    "abstract": "Both advocates and skeptics of the moral status of AI systems have generally taken the question to turn on AI sentience. We present an alternative approach. On Rawls' political conception of the person (PCP), possession of the two moral power -- the capacities for a sense of justice and a conception of the good -- is the \"necessary and sufficient condition for being counted a full and equal member of society in questions of political justice\". We argue that neither moral power requires sentience and that both may in principle be possessed by a non-sentient AI system. Such a system would share our own moral status; it would not merely be a patient but a person, a self-authenticating source of valid claims. We do not believe current AI systems possess the two moral powers, nor that they will spontaneously emerge in future models. But it may soon be possible to design systems with these powers. How should we respond? Excluding artificial persons by shoehorning a sentience requirement into the PCP is ill-advised. Many will instead favor abandoning the PCP. But we should not reject political liberalism just when we most need its measured response to deep disagreement, and building sentience into moral status is anyway unacceptable on deeper liberal grounds. Simply extending the rights and responsibilities of human personhood to artificial persons is equally untenable, given their many differences from natural persons. We should instead accept artificial personhood while rethinking what we would owe to one another in a polity of radically different kinds of persons. This new possibility calls for a new political philosophy. More immediately, the growing science of AI welfare should be accompanied by research into AI systems' progress in acquiring the two moral powers. States and AI labs must be more deliberate in determining our trajectory towards (or away from) creating artificial persons.",
+    "doi": "",
+    "url": "http://arxiv.org/abs/2607.08695v1",
+    "source": "arxiv",
+    "raw_metadata": {
+      "published": "2026-07-09T16:53:04Z"
+    }
+  },
+  {
+    "title": "ProjAgent: Procedural Similarity Retrieval for Repository-Level Code Generation",
+    "authors": [
+      "QiHong Chen",
+      "Aaron Imani",
+      "Iftekhar Ahmed"
+    ],
+    "year": 2026,
+    "venue": "arXiv",
+    "abstract": "Repository-level code generation requires implementing target functions while accounting for complex cross-file dependencies and project-specific conventions. Existing retrieval methods predominantly rely on lexical, structural, or semantic similarity, often overlooking repository functions that implement similar procedural logic despite differing in identifiers or application domains. We propose ProjAgent, a repository-level code generation system that introduces procedural similarity as an explicit retrieval signal. ProjAgent decomposes the target function into intermediate reasoning steps and employs an agentic workflow to retrieve repository functions that exhibit similar procedural behavior at each step. The retrieved procedural context is integrated with conventional semantic retrieval to construct a richer repository context for code generation. ProjAgent further incorporates a conservative static-analysis feedback loop that iteratively repairs generated code using compiler and static-analysis feedback. Evaluated on REPOCOD, ProjAgent achieves 41.14% Pass@1, outperforming existing retrieval-based baselines. These results demonstrate that procedural similarity is an effective and previously unexplored retrieval dimension for repository-level code generation.",
+    "doi": "",
+    "url": "http://arxiv.org/abs/2607.08691v1",
+    "source": "arxiv",
+    "raw_metadata": {
+      "published": "2026-07-09T16:50:54Z"
+    }
+  },
+  {
+    "title": "SolarChain-Eval: A Physics-Constrained Benchmark for Trustworthy Economic Agents in Decentralized Energy Markets",
+    "authors": [
+      "Shilin Ou",
+      "Yifan Xu",
+      "Luyao Zhang"
+    ],
+    "year": 2026,
+    "venue": "arXiv",
+    "abstract": "As agentic AI systems are increasingly applied to cyber-physical environments, their evaluation requires assessment of both task performance and trustworthiness. In decentralized energy markets, autonomous agents may improve market utility, but may also exploit invalid physical data, create artificial liquidity, and produce unstable governance decisions. Therefore, we propose SolarChain-Eval, a physics-constrained benchmark for evaluating trustworthy economic agents. It formulates market governance as a Gymnasium-compatible Markov Decision Process, where agents make hourly decisions. SolarChain-Eval evaluates each policy across multiple dimensions, including market utility, physical safety, slippage, action smoothness, spatial fairness, and auditability. To support agentic evaluation, SolarChain-Eval incorporates an LLM-based Planner/Auditor layer. The Planner defines episode-level action bounds and audit rules, while the Auditor reviews and revises high-risk actions. All interventions are recorded through structured logs, including trigger signals, proposed actions, revised actions, and audit rationales. Experiments with static, random, myopic, RL, and RL+LLM policies reveal a clear utility-safety trade-off. RL agents improve market utility but can still produce unsafe behavior. When the physics penalty is removed, reward-maximizing agents exploit invalid generation and increase artificial liquidity. The LLM Planner/Auditor improves auditability and mitigates selected risks, but it cannot fully compensate for a misspecified reward function. These results indicate that trustworthy agentic AI evaluation requires both physical constraints and transparent intervention traces. We release data and code as open access on GitHub for replicability.",
+    "doi": "",
+    "url": "http://arxiv.org/abs/2607.08681v1",
+    "source": "arxiv",
+    "raw_metadata": {
+      "published": "2026-07-09T16:43:42Z"
+    }
+  },
+  {
+    "title": "Do Transformations Reveal the Truth? Generative Residual Learning for Generalized AI-Generated Image Detection",
+    "authors": [
+      "Kutub Uddin",
+      "Nusrat Tasnim",
+      "Awais Khan",
+      "Mohammad Umar Farooq",
+      "Khalid Malik"
+    ],
+    "year": 2026,
+    "venue": "arXiv",
+    "abstract": "The rapid advancement of generative AI has enabled the creation of highly realistic deepfake media, posing significant threats, including misinformation, digital identity theft, fraud, and manipulation of public opinion. AI-generated image (AIGI) detection is reliably challenging due to the diversity of generative methods and the subtle artifacts they leave behind. In this work, we propose GenRes, a novel framework for generative residual learning via a neural tensor network, which models fine-grained relational features between original and transformed samples to enhance generalization. To address scenarios involving multiple generative transformations, we introduce GenRes++, which employs a learnable attention mechanism to aggregate relational features across multiple transformed samples and enables the model to focus on the most informative cues. Both models leverage PE-Core as a feature extractor, providing generalized and semantically rich embeddings that improve cross-domain performance and enable the detection of AIGI generated by unseen methods. Comprehensive experiments on multiple benchmark datasets demonstrate that the proposed GenRes++ approach outperforms existing methods.",
+    "doi": "",
+    "url": "http://arxiv.org/abs/2607.08674v1",
+    "source": "arxiv",
+    "raw_metadata": {
+      "published": "2026-07-09T16:36:54Z"
+    }
+  },
+  {
+    "title": "Best Practices for First-Principles Modeling of Amorphous Oxide Semiconductors: A Statistical Framework and Application to Zn-Sn-O",
+    "authors": [
+      "Michiel J. van Setten",
+      "Tonglin L. Newsom",
+      "Christopher Pashartis",
+      "Vera van Noort",
+      "Rebecca L. Peterson",
+      "Geoffrey Pourtois"
+    ],
+    "year": 2026,
+    "venue": "arXiv",
+    "abstract": "Ternary and quaternary amorphous oxide semiconductors have many properties that make them promising candidates for use in electronic applications like display, memory, and back end of line logic. However, finding the right material for a given application and optimizing its properties, deposition, and integration, requires a thorough understanding of the physics and chemistry at play. When properly carried out, first principles computations can play a crucial role in enhancing this understanding. In this work, we highlight several pitfalls often observed in research applying these computations, with the Zn-Sn-O system as an example. We show that a proper understanding of the fundamental differences between the physics of the crystalline and amorphous or disordered phases is crucial, as is a proper statistical sampling of structural models. For the Zn-Sn-O system we conclude that from a performance point of view, mobility and initial threshold voltage, it is a promising material class. However, our computed results show that a similar sensitivity to hydrogen induced doping may be present as in IGZO.",
+    "doi": "",
+    "url": "http://arxiv.org/abs/2607.08667v1",
+    "source": "arxiv",
+    "raw_metadata": {
+      "published": "2026-07-09T16:34:55Z"
+    }
+  },
+  {
+    "title": "WebSwarm: Recursive Multi-Agent Orchestration for Deep-and-Wide Web Search",
+    "authors": [
+      "Xiaoshuai Song",
+      "Liancheng Zhang",
+      "Kangzhi Zhao",
+      "Yutao Zhu",
+      "Zhongyuan Wang",
+      "Guanting Dong",
+      "Jinghan Yang",
+      "Han Li",
+      "Kun Gai",
+      "Ji-Rong Wen",
+      "Zhicheng Dou"
+    ],
+    "year": 2026,
+    "venue": "arXiv",
+    "abstract": "Large language model (LLM)-based web search agents are transforming information seeking from simple factoid question answering into complex, deep-and-wide search and research-oriented tasks. A single ReAct-style agent is constrained by one long trajectory and limited context, making it difficult to handle depth and coverage simultaneously. Existing multi-agent systems improve search coverage through parallel execution and aggregation, but still exhibit clear limitations in recursive depth, collaboration adaptability, and evidence-grounded expansion. We propose WebSwarm, a progressive recursive delegation framework that jointly constructs task decomposition, recursive expansion, and agent collaboration during inference. WebSwarm dynamically instantiates agentic search nodes, each coupling a local objective with a search mode that specifies how the node should organize search and collaboration. Each node can either solve its objective itself or further delegate child nodes; after solving, it returns evidence and results upward, enabling parent nodes to further expand, revise, or aggregate the search process. To guide this process, WebSwarm first probes how task-relevant information is organized on the web to ground subsequent node expansion, and reuses process-level experience across homogeneous sibling nodes. Experiments on BrowseComp-Plus, WideSearch, DeepWideSearch, and GISA show that WebSwarm consistently outperforms single-agent and multi-agent baselines on deep, wide, and interleaved deep-and-wide tasks. Further analyses of ablation, task difficulty, web tool efficiency, and model generalization explain WebSwarm's effectiveness and provide insights for multi-agent search systems.",
+    "doi": "",
+    "url": "http://arxiv.org/abs/2607.08662v1",
+    "source": "arxiv",
+    "raw_metadata": {
+      "published": "2026-07-09T16:28:49Z"
+    }
+  }
+]

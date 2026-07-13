@@ -1,0 +1,24 @@
+{
+  "topic": "AI research agent",
+  "initial_keywords": "",
+  "venue_scope": [],
+  "year_range": [
+    2020,
+    2026
+  ],
+  "threshold": 60,
+  "target": 30,
+  "created_at": "2026-07-10T20:21:20",
+  "rounds": [
+    {
+      "round": 1,
+      "query_terms": [
+        "agent"
+      ],
+      "kept": 0,
+      "excluded": 40,
+      "new_terms": [],
+      "stop_reason": "no_new_terms"
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Literature Matrix Extraction"
+  short_description: "Extract grounded structured evidence from a selected paper pool."
+  default_prompt: "Use $literature-matrix-extraction for this research task."

@@ -1,0 +1,158 @@
+﻿[
+    {
+        "label":  "gbt7714-numeric",
+        "file":  "china-national-standard-gb-t-7714-2015-numeric.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/china-national-standard-gb-t-7714-2015-numeric.csl",
+        "status":  "downloaded"
+    },
+    {
+        "label":  "gbt7714-author-date",
+        "file":  "china-national-standard-gb-t-7714-2015-author-date.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/china-national-standard-gb-t-7714-2015-author-date.csl",
+        "status":  "downloaded"
+    },
+    {
+        "label":  "ieee",
+        "file":  "ieee.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/ieee.csl",
+        "status":  "downloaded"
+    },
+    {
+        "label":  "nature",
+        "file":  "nature.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/nature.csl",
+        "status":  "downloaded"
+    },
+    {
+        "label":  "science",
+        "file":  "science.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/science.csl",
+        "status":  "downloaded"
+    },
+    {
+        "label":  "cell",
+        "file":  "cell.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/cell.csl",
+        "status":  "downloaded"
+    },
+    {
+        "label":  "elsevier-vancouver",
+        "file":  "elsevier-vancouver.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/elsevier-vancouver.csl",
+        "status":  "downloaded"
+    },
+    {
+        "label":  "elsevier-harvard",
+        "file":  "elsevier-harvard.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/elsevier-harvard.csl",
+        "status":  "downloaded"
+    },
+    {
+        "label":  "springer-basic-numeric",
+        "file":  "springer-basic-numeric.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/springer-basic-numeric.csl",
+        "status":  "failed: 远程服务器返回错误: (404) 未找到。"
+    },
+    {
+        "label":  "springer-basic-author-date",
+        "file":  "springer-basic-author-date.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/springer-basic-author-date.csl",
+        "status":  "downloaded"
+    },
+    {
+        "label":  "springer-vancouver",
+        "file":  "springer-vancouver.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/springer-vancouver.csl",
+        "status":  "downloaded"
+    },
+    {
+        "label":  "acm",
+        "file":  "association-for-computing-machinery.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/association-for-computing-machinery.csl",
+        "status":  "downloaded"
+    },
+    {
+        "label":  "acs",
+        "file":  "american-chemical-society.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/american-chemical-society.csl",
+        "status":  "downloaded"
+    },
+    {
+        "label":  "ama",
+        "file":  "american-medical-association.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/american-medical-association.csl",
+        "status":  "downloaded"
+    },
+    {
+        "label":  "nejm",
+        "file":  "the-new-england-journal-of-medicine.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/the-new-england-journal-of-medicine.csl",
+        "status":  "downloaded"
+    },
+    {
+        "label":  "pnas",
+        "file":  "proceedings-of-the-national-academy-of-sciences.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/proceedings-of-the-national-academy-of-sciences.csl",
+        "status":  "failed: 远程服务器返回错误: (404) 未找到。"
+    },
+    {
+        "label":  "bmj",
+        "file":  "bmj.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/bmj.csl",
+        "status":  "downloaded"
+    },
+    {
+        "label":  "vancouver",
+        "file":  "vancouver.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/vancouver.csl",
+        "status":  "failed: 远程服务器返回错误: (404) 未找到。"
+    },
+    {
+        "label":  "apa",
+        "file":  "apa.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/apa.csl",
+        "status":  "downloaded"
+    },
+    {
+        "label":  "royal-society-of-chemistry",
+        "file":  "royal-society-of-chemistry.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/royal-society-of-chemistry.csl",
+        "status":  "downloaded"
+    },
+    {
+        "label":  "angewandte-chemie",
+        "file":  "angewandte-chemie-international-edition.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/angewandte-chemie-international-edition.csl",
+        "status":  "failed: 远程服务器返回错误: (404) 未找到。"
+    },
+    {
+        "label":  "chinese-physics-c",
+        "file":  "chinese-physics-c.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/chinese-physics-c.csl",
+        "status":  "failed: 远程服务器返回错误: (404) 未找到。"
+    },
+    {
+        "label":  "acta-physica-sinica",
+        "file":  "acta-physica-sinica.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/acta-physica-sinica.csl",
+        "status":  "downloaded"
+    },
+    {
+        "label":  "chinese-medical-journal",
+        "file":  "chinese-medical-journal.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/chinese-medical-journal.csl",
+        "status":  "downloaded"
+    },
+    {
+        "label":  "journal-of-software",
+        "file":  "journal-of-software.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/journal-of-software.csl",
+        "status":  "failed: 远程服务器返回错误: (404) 未找到。"
+    },
+    {
+        "label":  "acta-automatica-sinica",
+        "file":  "acta-automatica-sinica.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/acta-automatica-sinica.csl",
+        "status":  "failed: 远程服务器返回错误: (404) 未找到。"
+    }
+]

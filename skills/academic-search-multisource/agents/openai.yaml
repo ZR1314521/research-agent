@@ -1,0 +1,4 @@
+interface:
+  display_name: "Academic Search Multisource"
+  short_description: "Search and normalize papers from multiple public scholarly APIs."
+  default_prompt: "Use $academic-search-multisource for this research task."

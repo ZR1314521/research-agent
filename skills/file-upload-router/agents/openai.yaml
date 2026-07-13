@@ -1,0 +1,4 @@
+interface:
+  display_name: "File Upload Router"
+  short_description: "Classify local research files and route each capability."
+  default_prompt: "Use $file-upload-router for this research task."

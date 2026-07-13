@@ -1,0 +1,4 @@
+interface:
+  display_name: "Workflow Orchestration"
+  short_description: "Guide bounded and auditable research task orchestration."
+  default_prompt: "Use $workflow-orchestration-patterns for this research task."

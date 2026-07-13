@@ -1,0 +1,4 @@
+interface:
+  display_name: "GB/T 7714 Strict Rules"
+  short_description: "Apply local GB/T 7714 checks and CSL rule evidence."
+  default_prompt: "Use $gbt7714-strict-rules for this research task."

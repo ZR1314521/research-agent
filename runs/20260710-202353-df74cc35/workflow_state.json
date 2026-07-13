@@ -1,0 +1,128 @@
+{
+  "run_id": "20260710-202353-df74cc35",
+  "topic": "AI research agent",
+  "keywords": "",
+  "venues": "",
+  "year_from": 2020,
+  "year_to": 2026,
+  "status": "failed",
+  "current_step": "review_draft",
+  "pending_steps": [
+    "upload",
+    "review_draft",
+    "experiment_analysis",
+    "reference_format",
+    "final_review"
+  ],
+  "completed_steps": [
+    "literature_search",
+    "recursive_screen",
+    "matrix_extract",
+    "rag_build",
+    "rag_query"
+  ],
+  "artifacts": {
+    "raw_papers": "C:\\Users\\Z18803231258\\Documents\\New project\\runs\\20260710-202353-df74cc35\\papers_raw.json",
+    "screened_papers": "C:\\Users\\Z18803231258\\Documents\\New project\\runs\\20260710-202353-df74cc35\\screened_papers.json",
+    "excluded_papers": "C:\\Users\\Z18803231258\\Documents\\New project\\runs\\20260710-202353-df74cc35\\excluded_papers.json",
+    "recursive_search_plan": "C:\\Users\\Z18803231258\\Documents\\New project\\runs\\20260710-202353-df74cc35\\recursive_search_plan.json",
+    "screening_log": "C:\\Users\\Z18803231258\\Documents\\New project\\runs\\20260710-202353-df74cc35\\screening_log.md",
+    "literature_matrix_csv": "C:\\Users\\Z18803231258\\Documents\\New project\\runs\\20260710-202353-df74cc35\\literature_matrix.csv",
+    "literature_matrix_md": "C:\\Users\\Z18803231258\\Documents\\New project\\runs\\20260710-202353-df74cc35\\literature_matrix.md",
+    "summary_notes": "C:\\Users\\Z18803231258\\Documents\\New project\\runs\\20260710-202353-df74cc35\\summary_notes.md",
+    "rag_index": "C:\\Users\\Z18803231258\\Documents\\New project\\runs\\20260710-202353-df74cc35\\rag_index",
+    "rag_chunks": "C:\\Users\\Z18803231258\\Documents\\New project\\runs\\20260710-202353-df74cc35\\rag_index\\chunks.jsonl",
+    "rag_answer": "C:\\Users\\Z18803231258\\Documents\\New project\\runs\\20260710-202353-df74cc35\\rag_answer.md",
+    "retrieval_log": "C:\\Users\\Z18803231258\\Documents\\New project\\runs\\20260710-202353-df74cc35\\rag_index\\retrieval_log.jsonl"
+  },
+  "errors": [
+    {
+      "timestamp": "2026-07-10T20:24:47",
+      "step": "review_draft",
+      "message": "IncompleteRead(0 bytes read)"
+    }
+  ],
+  "checkpoints": [],
+  "human_decisions": [],
+  "execution_log": [
+    {
+      "timestamp": "2026-07-10T20:23:53",
+      "step": "init",
+      "status": "completed",
+      "summary": "Run initialized"
+    },
+    {
+      "timestamp": "2026-07-10T20:23:53",
+      "step": "literature_search",
+      "status": "running",
+      "summary": ""
+    },
+    {
+      "timestamp": "2026-07-10T20:23:55",
+      "step": "literature_search",
+      "status": "completed",
+      "summary": "Collected 20 paper candidate(s)"
+    },
+    {
+      "timestamp": "2026-07-10T20:23:55",
+      "step": "recursive_screen",
+      "status": "running",
+      "summary": ""
+    },
+    {
+      "timestamp": "2026-07-10T20:23:56",
+      "step": "recursive_screen",
+      "status": "completed",
+      "summary": "Recursive screening completed"
+    },
+    {
+      "timestamp": "2026-07-10T20:23:56",
+      "step": "matrix_extract",
+      "status": "running",
+      "summary": ""
+    },
+    {
+      "timestamp": "2026-07-10T20:23:56",
+      "step": "matrix_extract",
+      "status": "completed",
+      "summary": "Extracted matrix for 0 paper(s)"
+    },
+    {
+      "timestamp": "2026-07-10T20:23:56",
+      "step": "rag_build",
+      "status": "running",
+      "summary": ""
+    },
+    {
+      "timestamp": "2026-07-10T20:23:56",
+      "step": "rag_build",
+      "status": "completed",
+      "summary": "RAG index built"
+    },
+    {
+      "timestamp": "2026-07-10T20:23:56",
+      "step": "rag_query",
+      "status": "running",
+      "summary": ""
+    },
+    {
+      "timestamp": "2026-07-10T20:23:56",
+      "step": "rag_query",
+      "status": "completed",
+      "summary": "RAG query completed"
+    },
+    {
+      "timestamp": "2026-07-10T20:23:56",
+      "step": "review_draft",
+      "status": "running",
+      "summary": ""
+    },
+    {
+      "timestamp": "2026-07-10T20:24:47",
+      "step": "review_draft",
+      "status": "failed",
+      "summary": "IncompleteRead(0 bytes read)"
+    }
+  ],
+  "metadata": {}
+}

@@ -1,0 +1,3 @@
+display_name: Web Search
+short_description: Search the public web via opencli for non-academic information.
+default_prompt: Search the open web for the given query and return results with titles, URLs, and snippets.

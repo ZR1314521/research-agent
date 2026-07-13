@@ -1,0 +1,26 @@
+﻿[
+    {
+        "label":  "pnas-long",
+        "file":  "proceedings-of-the-national-academy-of-sciences-of-the-united-states-of-america.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/proceedings-of-the-national-academy-of-sciences-of-the-united-states-of-america.csl",
+        "status":  "failed: 远程服务器返回错误: (404) 未找到。"
+    },
+    {
+        "label":  "angewandte-chemie-short",
+        "file":  "angewandte-chemie.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/angewandte-chemie.csl",
+        "status":  "downloaded"
+    },
+    {
+        "label":  "chinese-physics-b",
+        "file":  "chinese-physics-b.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/chinese-physics-b.csl",
+        "status":  "failed: 远程服务器返回错误: (404) 未找到。"
+    },
+    {
+        "label":  "china-information",
+        "file":  "china-information.csl",
+        "url":  "https://raw.githubusercontent.com/citation-style-language/styles/master/china-information.csl",
+        "status":  "downloaded"
+    }
+]

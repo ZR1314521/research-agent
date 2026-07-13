@@ -1,0 +1,4 @@
+interface:
+  display_name: "Workflow Visualizer"
+  short_description: "Render session events and status in terminal and JSON."
+  default_prompt: "Use $workflow-visualizer-dashboard for this research task."

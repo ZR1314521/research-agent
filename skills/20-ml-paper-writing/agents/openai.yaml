@@ -1,0 +1,4 @@
+interface:
+  display_name: "ML Paper Writing"
+  short_description: "Draft evidence-backed ML paper sections and related work."
+  default_prompt: "Use $20-ml-paper-writing for this research task."

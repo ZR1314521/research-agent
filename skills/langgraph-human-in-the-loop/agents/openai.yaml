@@ -1,0 +1,4 @@
+interface:
+  display_name: "Human In The Loop"
+  short_description: "Guide pause, approval, correction, and resume behavior."
+  default_prompt: "Use $langgraph-human-in-the-loop for this research task."

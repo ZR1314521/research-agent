@@ -1,0 +1,4 @@
+interface:
+  display_name: "Humanizer"
+  short_description: "Make generated academic prose restrained and natural."
+  default_prompt: "Use $humanizer for this research task."

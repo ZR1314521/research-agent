@@ -1,0 +1,3 @@
+display_name: Git
+short_description: Version control with git. Commit, log, diff, branch, checkout.
+default_prompt: Run the given git command in the working directory.

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Experiment Data Analysis"
+  short_description: "Analyze research tables, outliers, trends, and chart options."
+  default_prompt: "Use $experiment-data-analysis for this research task."

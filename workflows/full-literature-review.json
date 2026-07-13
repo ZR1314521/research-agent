@@ -1,0 +1,13 @@
+{
+  "name": "full-literature-review",
+  "description": "Optional macro. Run only after an explicit request for a complete literature-review workflow.",
+  "max_search_rounds": 3,
+  "steps": [
+    {"skill": "academic-search-multisource", "checkpoint_after": true},
+    {"skill": "literature-screening", "checkpoint_after": true},
+    {"skill": "literature-matrix-extraction", "checkpoint_after": false},
+    {"skill": "rag-vector-knowledge-base", "checkpoint_after": false},
+    {"skill": "systematic-literature-review", "checkpoint_after": true},
+    {"skill": "reference-format-gbt7714", "checkpoint_after": false}
+  ]
+}
