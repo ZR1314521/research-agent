@@ -21,27 +21,13 @@ npm install
 cd ..
 ```
 
-## 3. 配置
+## 3. 首次启动（用假 Key 占位）
 
-### 方式 A：网页一键配置（推荐）
-启动后端，打开 `http://localhost:3000`，点击右上角 **Setup**。
-选择提供商，填入 API Key，点击 Apply。重启后端即可。
+先复制一份空配置：
 
-### 方式 B：手动编辑
-复制 `.env.example` 为 `.env`，填入：
-
+```bash
+cp .env.example .env
 ```
-RESEARCH_AGENT_LLM_PROVIDER=deepseek
-RESEARCH_AGENT_LLM_MODEL=deepseek-v4-pro
-RESEARCH_AGENT_LLM_BASE_URL=https://api.deepseek.com/v1
-RESEARCH_AGENT_LLM_API_KEY=你的API密钥
-RESEARCH_AGENT_LLM_TIMEOUT=300
-RESEARCH_AGENT_LLM_MAX_TOKENS=0
-RESEARCH_AGENT_LLM_RETRY=1
-RESEARCH_AGENT_CONTEXT_WINDOW=1000000
-```
-
-## 4. 启动
 
 打开**两个**终端：
 
@@ -59,6 +45,12 @@ npm start
 ```
 
 浏览器打开 `http://localhost:3000`
+
+## 4. 配置 API Key
+
+点击右上角 **Setup** → 选择提供商 → 填入 API Key → Apply → 重启后端即可使用。
+
+> 也可以手动编辑 `.env` 文件填入真实 Key 后重启。
 
 ## 5. 支持的提供商
 
