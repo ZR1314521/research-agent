@@ -127,8 +127,8 @@ class LocalWorkbenchApiTests(unittest.TestCase):
 
         self.assertIn("resolveApproval(true)", source)
         self.assertIn("resolveApproval(false)", source)
-        self.assertIn("Accept", source)
-        self.assertIn("Reject", source)
+        self.assertIn(">允许</button>", source)
+        self.assertIn(">拒绝</button>", source)
 
     def test_workbench_uses_resumable_turn_stream_and_ignores_late_runs(self) -> None:
         source = (ROOT / "workbench" / "src" / "App.js").read_text(encoding="utf-8")
