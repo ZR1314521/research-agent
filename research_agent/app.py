@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+import urllib.error
+import urllib.request
 
 from research_agent.chat import ResearchChatAgent
 from research_agent.config import _load_dotenv
@@ -10,7 +13,10 @@ from research_agent.core.contracts import register_artifacts
 from research_agent.executor import ToolExecutor
 from research_agent.version import RUNTIME_VERSION
 from research_agent.provider_runtime import CallLedger
+from research_agent.platform_store import PlatformStore
+from research_agent.scheduler import ScheduleService
 from research_agent.turns import ActiveTurnError, TurnCoordinator
+from research_agent.usage import UsageService
 
 
 try:
@@ -43,7 +49,22 @@ def create_app(agent: ResearchChatAgent | None = None) -> Any:
         raise RuntimeError("FastAPI is not installed. Install fastapi and uvicorn to run the HTTP API.")
     agent = agent or ResearchChatAgent()
     coordinator = TurnCoordinator(agent)
-    app = FastAPI(title="AI Research Agent", version="0.5.1")
+    platform_store = PlatformStore(agent.config.runs_dir)
+    usage_service = UsageService(agent.config.runs_dir, platform_store)
+    schedule_service = ScheduleService(agent, coordinator, platform_store)
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        schedule_service.start()
+        try:
+            yield
+        finally:
+            schedule_service.stop()
+
+    app = FastAPI(title="AI Research Agent", version=RUNTIME_VERSION, lifespan=lifespan)
+    app.state.platform_store = platform_store
+    app.state.usage_service = usage_service
+    app.state.schedule_service = schedule_service
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://127.0.0.1:3000", "http://localhost:3000"],
@@ -57,6 +78,14 @@ def create_app(agent: ResearchChatAgent | None = None) -> Any:
             return agent.sessions.load(run_id)
         except (FileNotFoundError, ValueError) as error:
             raise HTTPException(status_code=404, detail="Run not found") from error
+
+    def payload_or_400(action):
+        try:
+            return action()
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="记录不存在") from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
 
     async def save_upload(run_id: str, files: list[UploadFile]) -> dict[str, Any]:
         session = load_run(run_id)
@@ -123,6 +152,143 @@ def create_app(agent: ResearchChatAgent | None = None) -> Any:
             {"name": "Zhipu (智谱)", "base_url": "https://open.bigmodel.cn/api/paas/v4", "model": "glm-4-plus", "context": 128000},
             {"name": "Custom", "base_url": "", "model": "", "context": 0},
         ]
+
+    @app.get("/usage")
+    def usage_report(
+        provider: str = "",
+        model: str = "",
+        status: str = "",
+        date_from: str = "",
+        date_to: str = "",
+        limit: int = 200,
+    ):
+        return usage_service.report(
+            provider=provider,
+            model=model,
+            status=status,
+            date_from=date_from,
+            date_to=date_to,
+            limit=limit,
+        )
+
+    @app.get("/data-sources")
+    def data_sources():
+        return platform_store.list_data_sources()
+
+    @app.post("/data-sources")
+    async def create_data_source(request: Request):
+        body = await request.json()
+        return payload_or_400(lambda: platform_store.create_data_source(body))
+
+    @app.post("/data-sources/{source_id}")
+    async def update_data_source(source_id: str, request: Request):
+        body = await request.json()
+        return payload_or_400(lambda: platform_store.update_data_source(source_id, body))
+
+    @app.post("/data-sources/{source_id}/delete")
+    def delete_data_source(source_id: str):
+        return {"deleted": payload_or_400(lambda: platform_store.delete_data_source(source_id))}
+
+    @app.post("/data-sources/{source_id}/check")
+    def check_data_source(source_id: str):
+        if not platform_store.privacy()["external_network_access"]:
+            raise HTTPException(status_code=403, detail="权限与隐私设置已关闭外部网络访问")
+        try:
+            source = platform_store.get_data_source(source_id)
+            url = platform_store.source_check_url(source_id)
+            request = urllib.request.Request(url, headers={"User-Agent": "Research-Agent/0.6"})
+            try:
+                with urllib.request.urlopen(request, timeout=8) as response:
+                    status_code = int(getattr(response, "status", 200))
+                    response.read(1)
+                ok = status_code < 500
+                message = f"连接正常（HTTP {status_code}）"
+            except urllib.error.HTTPError as error:
+                ok = error.code < 500
+                message = f"地址可访问（HTTP {error.code}）" if ok else f"连接失败（HTTP {error.code}）"
+            if ok and source["kind"] == "paid":
+                message += "；凭据已本机加密，专属登录连接器待后续接入"
+            return platform_store.record_source_check(source_id, ok, message)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="数据源不存在") from error
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            message = f"连接失败：{getattr(error, 'reason', error)}"
+            return platform_store.record_source_check(source_id, False, message)
+
+    @app.get("/settings/privacy")
+    def privacy_settings():
+        return platform_store.privacy()
+
+    @app.post("/settings/privacy")
+    async def update_privacy(request: Request):
+        body = await request.json()
+        value = payload_or_400(lambda: platform_store.save_privacy(body))
+        removed = usage_service.prune(value["log_retention_days"])
+        return {**value, "pruned_records": removed}
+
+    @app.get("/settings/account")
+    def account_settings():
+        return platform_store.account()
+
+    @app.post("/settings/account")
+    async def update_account(request: Request):
+        body = await request.json()
+        return platform_store.save_account(body)
+
+    @app.post("/settings/clear-logs")
+    def clear_usage_logs():
+        return {"cleared_files": usage_service.clear()}
+
+    @app.get("/settings/approvals")
+    def approval_history(limit: int = 100):
+        items: list[dict[str, Any]] = []
+        sessions_root = agent.config.runs_dir / "sessions"
+        if sessions_root.exists():
+            for path in sorted(sessions_root.glob("*/session.json"), key=lambda item: item.stat().st_mtime, reverse=True):
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                for event in reversed(data.get("events") or []):
+                    if event.get("event") not in {"approval_requested", "approval_resolved"}:
+                        continue
+                    items.append({
+                        "run_id": path.parent.name,
+                        "time": event.get("timestamp", ""),
+                        "event": event.get("event", ""),
+                        "skill": event.get("skill", ""),
+                        "summary": event.get("summary", ""),
+                        "approved": event.get("approved"),
+                    })
+                    if len(items) >= max(1, min(500, int(limit))):
+                        return items
+        return items
+
+    @app.get("/schedules")
+    def schedules():
+        return platform_store.list_schedules()
+
+    @app.post("/schedules")
+    async def create_schedule(request: Request):
+        body = await request.json()
+        return payload_or_400(lambda: platform_store.create_schedule(body))
+
+    @app.post("/schedules/{schedule_id}")
+    async def update_schedule(schedule_id: str, request: Request):
+        body = await request.json()
+        return payload_or_400(lambda: platform_store.update_schedule(schedule_id, body))
+
+    @app.post("/schedules/{schedule_id}/delete")
+    def delete_schedule(schedule_id: str):
+        return {"deleted": platform_store.delete_schedule(schedule_id)}
+
+    @app.post("/schedules/{schedule_id}/run")
+    def run_schedule_now(schedule_id: str):
+        return payload_or_400(lambda: schedule_service.run_now(schedule_id))
+
+    @app.get("/schedule-runs")
+    def schedule_runs(schedule_id: str = "", limit: int = 100):
+        return platform_store.schedule_runs(schedule_id, limit)
 
     @app.get("/sessions")
     def list_sessions():

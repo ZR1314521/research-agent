@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import TopNav, { BrandMark } from "./components/TopNav";
+import ApprovalDock from "./components/ApprovalDock";
 import HomePage from "./pages/HomePage";
 import SettingsPage from "./pages/SettingsPage";
 import TaskCenterPage from "./pages/TaskCenterPage";
@@ -126,17 +127,10 @@ function WorkspacePage({
               </div>
             );
           })}
-          {pendingApproval && (
-            <div className="approval-card">
-              <span className="approval-icon">!</span>
-              <div><strong>这一步需要你的确认</strong><p>{pendingApproval.summary || "确认后 Agent 才会继续执行。"}</p></div>
-              <button onClick={() => resolveApproval(true)}>允许</button>
-              <button className="reject-action" onClick={() => resolveApproval(false)}>拒绝</button>
-            </div>
-          )}
           <div ref={bottomRef} />
         </section>
 
+        <ApprovalDock pending={pendingApproval} onResolve={resolveApproval} />
         {error && <div className="workspace-error"><span>!</span>{error}</div>}
 
         <section className="composer-panel">
@@ -193,12 +187,23 @@ export default function App() {
   const [modelName, setModelName] = useState("");
   const [tokenUsage, setTokenUsage] = useState(0);
   const [tokenLimit, setTokenLimit] = useState(1000000);
+  const [account, setAccount] = useState(null);
   const abortRef = useRef(null);
   const generationRef = useRef(0);
   const sequenceRef = useRef(0);
   const turnIdRef = useRef("");
   const bottomRef = useRef(null);
   const busy = BUSY.has(turnState);
+
+  useEffect(() => {
+    try {
+      const colors = JSON.parse(localStorage.getItem("research-agent-theme-colors") || "null");
+      if (!colors) return;
+      const root = document.documentElement;
+      const variables = { page: "--page-bg", surface: "--cream-0", soft: "--sage-1", accent: "--sage-4", strong: "--sage-5", text: "--cocoa", muted: "--muted", line: "--line" };
+      Object.entries(variables).forEach(([key, variable]) => colors[key] && root.style.setProperty(variable, colors[key]));
+    } catch {}
+  }, []);
 
   const navigate = useCallback(next => {
     window.location.hash = `/${next}`;
@@ -231,6 +236,7 @@ export default function App() {
       if (data.model) setModelName(data.model);
     }).catch(() => {});
     fetch(`${API}/styles`).then(response => response.json()).then(setStyleGroups).catch(() => {});
+    fetch(`${API}/settings/account`).then(response => response.json()).then(setAccount).catch(() => {});
     loadSessions();
   }, [loadSessions]);
 
@@ -249,6 +255,8 @@ export default function App() {
     if (run.active_turn?.turn_id) { setActiveTurnId(run.active_turn.turn_id); setTurnState(run.active_turn.status || "running"); }
     else if (pending) setTurnState("waiting_approval");
     else if (run.status === "completed") setTurnState("completed");
+    else if (run.status === "failed") setTurnState("failed");
+    else if (run.status) setTurnState(["active", "planning", "waiting_user"].includes(run.status) ? "idle" : run.status);
   }, [loadSessions]);
 
   const refreshRun = useCallback(async id => {
@@ -387,14 +395,19 @@ export default function App() {
     if (!pendingApproval || turnState !== "waiting_approval") return;
     setPendingApproval(null); setTurnState("running");
     if (!approved) {
-      try { await fetch(`${API}/runs/${encodeURIComponent(runId)}/reject`, { method: "POST" }); } catch {}
-      applyRun({ pending_action: null }); return;
+      try {
+        const response = await fetch(`${API}/runs/${encodeURIComponent(runId)}/reject`, { method: "POST" });
+        if (!response.ok) throw new Error((await response.json()).detail || response.statusText);
+        const data = await response.json(); applyRun(data);
+        if (data.assistant_message) setMessages(previous => [...previous, { role: "agent", content: data.assistant_message, steps: [], calls: [], artifacts: data.artifacts || {}, streaming: false }]);
+      } catch (eventError) { setError(eventError.message); setTurnState("idle"); }
+      return;
     }
     try {
       const response = await fetch(`${API}/runs/${encodeURIComponent(runId)}/approve`, { method: "POST" });
       if (!response.ok) throw new Error((await response.json()).detail || response.statusText);
       const data = await response.json(); applyRun(data);
-      setMessages(previous => [...previous, { role: "agent", content: data.message || "操作已完成。", steps: (data.events || []).filter(event => event.event === "tool_observed").map(event => ({ key: event.sequence, tool: event.skill || "", status: "done", summary: (event.summary || "").slice(0, 200) })), calls: [], artifacts: data.artifacts || {}, streaming: false }]);
+      setMessages(previous => [...previous, { role: "agent", content: data.assistant_message || "操作已完成。", steps: (data.events || []).filter(event => event.event === "tool_observed").map(event => ({ key: event.sequence, tool: event.skill || "", status: "done", summary: (event.summary || "").slice(0, 200) })), calls: [], artifacts: data.artifacts || {}, streaming: false }]);
     } catch (eventError) { setError(eventError.message); setTurnState("idle"); }
   };
 
@@ -442,20 +455,22 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <TopNav page={page} onNavigate={navigate} />
-      {page === "home" && <HomePage onStart={() => navigate("workspace")} />}
-      {page === "workspace" && <WorkspacePage
-        runId={runId} sessions={sessions} selectedSessions={selectedSessions} setSelectedSessions={setSelectedSessions}
-        deleteMode={deleteMode} setDeleteMode={setDeleteMode} onDeleteSessions={deleteSessions} onNewRun={newRun}
-        onSwitchSession={switchSession} turnState={turnState} modelName={modelName} tokenUsage={tokenUsage}
-        tokenLimit={tokenLimit} control={control} messages={messages} msgDeleteMode={msgDeleteMode}
-        selectedMsgs={selectedMsgs} setSelectedMsgs={setSelectedMsgs} onDeleteMessages={deleteMessages}
-        pendingApproval={pendingApproval} resolveApproval={resolveApproval} error={error} files={files} setFiles={setFiles}
-        upload={upload} styleGroups={styleGroups} convertFormat={convertFormat} planActive={planActive} startTurn={startTurn}
-        message={message} setMessage={setMessage} busy={busy} activeTurnId={activeTurnId} bottomRef={bottomRef}
-      />}
-      {page === "tasks" && <TaskCenterPage sessions={sessions} onOpen={openTask} onRefresh={loadSessions} />}
-      {page === "settings" && <SettingsPage api={API} />}
+      <TopNav page={page} onNavigate={navigate} account={account} />
+      <div className="page-transition" key={page}>
+        {page === "home" && <HomePage onStart={() => navigate("workspace")} />}
+        {page === "workspace" && <WorkspacePage
+          runId={runId} sessions={sessions} selectedSessions={selectedSessions} setSelectedSessions={setSelectedSessions}
+          deleteMode={deleteMode} setDeleteMode={setDeleteMode} onDeleteSessions={deleteSessions} onNewRun={newRun}
+          onSwitchSession={switchSession} turnState={turnState} modelName={modelName} tokenUsage={tokenUsage}
+          tokenLimit={tokenLimit} control={control} messages={messages} msgDeleteMode={msgDeleteMode}
+          selectedMsgs={selectedMsgs} setSelectedMsgs={setSelectedMsgs} onDeleteMessages={deleteMessages}
+          pendingApproval={pendingApproval} resolveApproval={resolveApproval} error={error} files={files} setFiles={setFiles}
+          upload={upload} styleGroups={styleGroups} convertFormat={convertFormat} planActive={planActive} startTurn={startTurn}
+          message={message} setMessage={setMessage} busy={busy} activeTurnId={activeTurnId} bottomRef={bottomRef}
+        />}
+        {page === "tasks" && <TaskCenterPage api={API} sessions={sessions} onOpen={openTask} onRefresh={loadSessions} />}
+        {page === "settings" && <SettingsPage api={API} onAccountChange={setAccount} />}
+      </div>
     </div>
   );
 }

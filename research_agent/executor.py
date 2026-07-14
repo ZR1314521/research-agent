@@ -23,6 +23,7 @@ from research_agent.capabilities.git_ops import GitService
 from research_agent.capabilities.shell import ShellService
 from research_agent.config import AgentConfig
 from research_agent.core.contracts import ContractError, has_required_artifacts, validate_arguments, validate_result_quality
+from research_agent.platform_store import DEFAULT_PRIVACY, platform_setting
 from research_agent.session import ChatSession
 from research_agent.skill_registry import SkillRegistry
 
@@ -91,6 +92,12 @@ class ToolExecutor:
         spec = self.registry.get(skill_name)
         if not spec.requires_confirmation:
             return False
+        privacy = {
+            **DEFAULT_PRIVACY,
+            **dict(platform_setting(self.config.runs_dir, "privacy", {}) or {}),
+        }
+        if not privacy["approval_required"]:
+            return False
         policy = self.confirmation_policies.get(spec.handler or "")
         return policy(arguments) if policy else True
 
@@ -104,6 +111,12 @@ class ToolExecutor:
         spec = self.registry.get(skill_name)
         if not spec.handler:
             raise ValueError(f"Skill is design-only and cannot execute directly: {skill_name}")
+        privacy = {
+            **DEFAULT_PRIVACY,
+            **dict(platform_setting(self.config.runs_dir, "privacy", {}) or {}),
+        }
+        if spec.network_access and not privacy["external_network_access"]:
+            raise ValueError("权限与隐私设置已关闭外部网络访问")
         handler = self.handlers.get(spec.handler)
         if handler is None:
             raise ValueError(f"No local handler for skill: {skill_name}")

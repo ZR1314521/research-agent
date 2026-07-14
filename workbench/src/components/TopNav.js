@@ -17,7 +17,8 @@ export function BrandMark() {
   );
 }
 
-export default function TopNav({ page, onNavigate }) {
+export default function TopNav({ page, onNavigate, account }) {
+  const initials = String(account?.display_name || "研").trim().slice(0, 2) || "研";
   return (
     <header className="top-nav">
       <button className="brand-button" onClick={() => onNavigate("home")} aria-label="返回首页">
@@ -35,7 +36,7 @@ export default function TopNav({ page, onNavigate }) {
           </button>
         ))}
       </nav>
-      <span className="user-avatar" aria-label="本地用户"><i /></span>
+      <span className="user-avatar profile-avatar" aria-label={account?.display_name || "本地用户"} title={account?.display_name || "本地用户"}>{initials}</span>
     </header>
   );
 }

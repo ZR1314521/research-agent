@@ -124,11 +124,15 @@ class LocalWorkbenchApiTests(unittest.TestCase):
 
     def test_workbench_keeps_accept_and_reject_controls(self) -> None:
         source = (ROOT / "workbench" / "src" / "App.js").read_text(encoding="utf-8")
+        dock = (ROOT / "workbench" / "src" / "components" / "ApprovalDock.js").read_text(encoding="utf-8")
 
-        self.assertIn("resolveApproval(true)", source)
-        self.assertIn("resolveApproval(false)", source)
-        self.assertIn(">允许</button>", source)
-        self.assertIn(">拒绝</button>", source)
+        self.assertIn("<ApprovalDock pending={pendingApproval} onResolve={resolveApproval}", source)
+        self.assertIn("/reject", source)
+        self.assertIn("/approve", source)
+        self.assertIn("onResolve(false)", dock)
+        self.assertIn("onResolve(true)", dock)
+        self.assertIn(">允许并继续</button>", dock)
+        self.assertIn(">拒绝</button>", dock)
 
     def test_workbench_uses_resumable_turn_stream_and_ignores_late_runs(self) -> None:
         source = (ROOT / "workbench" / "src" / "App.js").read_text(encoding="utf-8")
@@ -146,6 +150,28 @@ class LocalWorkbenchApiTests(unittest.TestCase):
         self.assertIn('control("resume")', source)
         self.assertIn("pause_requested", source)
         self.assertIn("rate_limited", source)
+
+    def test_workbench_exposes_home_settings_and_scheduler_features(self) -> None:
+        home = (ROOT / "workbench" / "src" / "pages" / "HomePage.js").read_text(encoding="utf-8")
+        settings = (ROOT / "workbench" / "src" / "pages" / "SettingsPage.js").read_text(encoding="utf-8")
+        tasks = (ROOT / "workbench" / "src" / "pages" / "TaskCenterPage.js").read_text(encoding="utf-8")
+
+        self.assertIn("https://maas.ai-yuanjing.com/", home)
+        self.assertIn("/maas-brand.png", home)
+        self.assertIn("onPointerMove", home)
+        self.assertIn("学术数据源", settings)
+        self.assertIn("色彩设计", settings)
+        self.assertIn("/settings/privacy", settings)
+        self.assertIn("/usage?", settings)
+        self.assertIn("/schedules", tasks)
+        self.assertIn("仅一次", tasks)
+        self.assertIn("每天", tasks)
+        self.assertIn("每周", tasks)
+
+    def test_settings_effects_do_not_return_async_loader_promises(self) -> None:
+        settings = (ROOT / "workbench" / "src" / "pages" / "SettingsPage.js").read_text(encoding="utf-8")
+
+        self.assertNotIn("useEffect(load, [load])", settings)
 
 
 if __name__ == "__main__":

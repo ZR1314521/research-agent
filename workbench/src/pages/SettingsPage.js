@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 const SECTIONS = [
   ["quick", "⚙", "快速设置"],
-  ["models", "◉", "模型服务"],
+  ["usage", "⌁", "用量统计"],
   ["sources", "▤", "学术数据源"],
-  ["research", "⌁", "科研偏好"],
+  ["theme", "◌", "色彩设计"],
   ["privacy", "◇", "权限与隐私"],
-  ["system", "▣", "系统与诊断"],
+  ["account", "▣", "账号信息"],
 ];
 
 const PROVIDER_LINKS = {
@@ -16,6 +16,13 @@ const PROVIDER_LINKS = {
   moonshot: { site: "https://www.moonshot.cn/", key: "https://platform.moonshot.cn/console/api-keys", docs: "https://platform.moonshot.cn/docs/" },
   zhipu: { site: "https://www.bigmodel.cn/", key: "https://open.bigmodel.cn/usercenter/apikeys", docs: "https://docs.bigmodel.cn/" },
 };
+
+const PALETTES = [
+  { name: "燕麦奶油", note: "温和、低对比", colors: { page: "#f7f2e9", surface: "#fffdf8", soft: "#eef0e6", accent: "#6f7d61", strong: "#536047", text: "#5f5449", muted: "#8b8175", line: "#d9cbbb" } },
+  { name: "鼠尾草", note: "清爽、专注", colors: { page: "#f1f3ec", surface: "#fbfcf7", soft: "#dfe8d7", accent: "#60765b", strong: "#40553e", text: "#3f4a3d", muted: "#768074", line: "#c9d2c3" } },
+  { name: "杏仁陶土", note: "温暖、沉静", colors: { page: "#f7eee6", surface: "#fffaf5", soft: "#f2ded1", accent: "#a56f5e", strong: "#7e4f43", text: "#5d463e", muted: "#8e756b", line: "#dec8bb" } },
+  { name: "雾蓝纸张", note: "理性、轻盈", colors: { page: "#eef3f4", surface: "#fafcfc", soft: "#dce8e9", accent: "#607d82", strong: "#435f64", text: "#405154", muted: "#748488", line: "#c5d3d5" } },
+];
 
 function providerKey(value) {
   const name = String(value || "").toLowerCase();
@@ -27,8 +34,28 @@ function providerKey(value) {
   return "";
 }
 
-export default function SettingsPage({ api }) {
-  const [section, setSection] = useState("quick");
+async function apiJson(url, options = {}) {
+  const response = await fetch(url, options);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.detail || response.statusText);
+  return body;
+}
+
+function formatNumber(value) {
+  return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 }).format(Number(value || 0));
+}
+
+function formatDate(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN", { hour12: false });
+}
+
+function SectionHeading({ title, text, actions }) {
+  return <div className="settings-heading settings-heading-row"><div><h1>{title}</h1><p>{text}</p></div>{actions}</div>;
+}
+
+function QuickSetup({ api }) {
   const [presets, setPresets] = useState([]);
   const [provider, setProvider] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -42,10 +69,7 @@ export default function SettingsPage({ api }) {
   const [status, setStatus] = useState({ kind: "", text: "" });
 
   useEffect(() => {
-    Promise.all([
-      fetch(`${api}/setup/presets`).then(response => response.ok ? response.json() : []),
-      fetch(`${api}/health`).then(response => response.ok ? response.json() : {}),
-    ]).then(([items, health]) => {
+    Promise.all([apiJson(`${api}/setup/presets`), apiJson(`${api}/health`)]).then(([items, health]) => {
       setPresets(items);
       const match = items.find(item => providerKey(item.name) === providerKey(health.provider));
       if (match) {
@@ -53,7 +77,7 @@ export default function SettingsPage({ api }) {
       } else if (health.provider || health.model) {
         setProvider(health.provider || "自定义"); setModel(health.model || "");
       }
-    }).catch(() => setStatus({ kind: "error", text: "暂时无法读取当前配置" }));
+    }).catch(error => setStatus({ kind: "error", text: `暂时无法读取当前配置：${error.message}` }));
   }, [api]);
 
   const links = useMemo(() => PROVIDER_LINKS[providerKey(provider)] || null, [provider]);
@@ -63,80 +87,154 @@ export default function SettingsPage({ api }) {
     if (item) { setBaseUrl(item.base_url || ""); setModel(item.model || ""); setContext(String(item.context || 1000000)); }
     setStatus({ kind: "", text: "" });
   };
-
   const testConnection = async () => {
-    setStatus({ kind: "checking", text: "正在检查后端连接…" });
-    try {
-      const response = await fetch(`${api}/health`);
-      if (!response.ok) throw new Error(response.statusText);
-      setStatus({ kind: "success", text: "后端连接正常；新模型配置需保存并重启后生效" });
-    } catch (error) {
-      setStatus({ kind: "error", text: `连接失败：${error.message}` });
-    }
+    setStatus({ kind: "checking", text: "正在检查本地后端…" });
+    try { await apiJson(`${api}/health`); setStatus({ kind: "success", text: "后端连接正常；保存新模型配置后需要重启" }); }
+    catch (error) { setStatus({ kind: "error", text: `连接失败：${error.message}` }); }
   };
-
   const save = async () => {
-    if (!provider || !baseUrl || !model || !apiKey) {
-      setStatus({ kind: "error", text: "请完整填写服务商、API Key、Base URL 和模型名称" });
-      return;
-    }
+    if (!provider || !baseUrl || !model || !apiKey) { setStatus({ kind: "error", text: "请完整填写服务商、API Key、Base URL 和模型名称" }); return; }
     setStatus({ kind: "checking", text: "正在保存…" });
     try {
-      const response = await fetch(`${api}/setup/apply`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          llm_provider: providerKey(provider) || provider.toLowerCase().split(" ")[0],
-          llm_model: model, llm_base_url: baseUrl, llm_api_key: apiKey,
-          context_window: context, llm_timeout: timeout, max_concurrency: concurrency,
-        }),
-      });
-      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || response.statusText);
-      setStatus({ kind: "success", text: "配置已保存，请重启后端使其生效" });
-    } catch (error) {
-      setStatus({ kind: "error", text: `保存失败：${error.message}` });
-    }
+      await apiJson(`${api}/setup/apply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ llm_provider: providerKey(provider) || provider.toLowerCase().split(" ")[0], llm_model: model, llm_base_url: baseUrl, llm_api_key: apiKey, context_window: context, llm_timeout: timeout, max_concurrency: concurrency }) });
+      setApiKey(""); setStatus({ kind: "success", text: "配置已保存，请重启后端使其生效" });
+    } catch (error) { setStatus({ kind: "error", text: `保存失败：${error.message}` }); }
   };
 
-  return (
-    <main className="settings-page page-frame">
-      <aside className="settings-nav">
-        {SECTIONS.map(([key, icon, label]) => <button key={key} className={section === key ? "active" : ""} onClick={() => setSection(key)}><span>{icon}</span>{label}</button>)}
-      </aside>
-      <section className="settings-content">
-        {section !== "quick" ? (
-          <div className="settings-placeholder">
-            <span>{SECTIONS.find(item => item[0] === section)?.[1]}</span>
-            <h1>{SECTIONS.find(item => item[0] === section)?.[2]}</h1>
-            <p>该设置模块将在下一阶段接入。当前不会保存或伪造任何配置。</p>
-          </div>
-        ) : (
-          <>
-            <div className="settings-heading"><h1>快速设置</h1><p>连接你的模型服务，即可开始使用</p></div>
-            <section className="quick-setup-card">
-              <div className="form-row provider-row">
-                <label htmlFor="provider">模型服务提供商</label>
-                <div className="field-stack">
-                  <select id="provider" value={provider} onChange={event => chooseProvider(event.target.value)}>
-                    <option value="">选择服务商</option>
-                    {presets.map(item => <option value={item.name} key={item.name}>{item.name}</option>)}
-                    <option value="自定义">自定义 OpenAI 兼容服务</option>
-                  </select>
-                  {links && <div className="provider-links"><a href={links.site} target="_blank" rel="noreferrer">官方网站 ↗</a><a href={links.key} target="_blank" rel="noreferrer">申请 API Key ↗</a><a href={links.docs} target="_blank" rel="noreferrer">官方文档 ↗</a></div>}
-                </div>
-              </div>
-              <div className="form-row"><label htmlFor="api-key">API Key</label><div className="password-field"><input id="api-key" type={showKey ? "text" : "password"} value={apiKey} onChange={event => setApiKey(event.target.value)} placeholder="输入后仅保存在本机配置中" /><button onClick={() => setShowKey(value => !value)} type="button">{showKey ? "隐藏" : "显示"}</button></div></div>
-              <div className="form-row"><label htmlFor="base-url">Base URL</label><input id="base-url" value={baseUrl} onChange={event => setBaseUrl(event.target.value)} placeholder="https://api.example.com/v1" /></div>
-              <div className="form-row"><label htmlFor="model-name">模型名称</label><input id="model-name" value={model} onChange={event => setModel(event.target.value)} placeholder="输入模型标识" /></div>
-              <button className="advanced-toggle" onClick={() => setAdvanced(value => !value)}><span>高级选项</span><span>{advanced ? "⌃" : "⌄"}</span></button>
-              {advanced && <div className="advanced-grid"><label>上下文长度<input value={context} onChange={event => setContext(event.target.value)} /></label><label>请求超时（秒）<input value={timeout} onChange={event => setTimeoutValue(event.target.value)} /></label><label>最大并发数<input type="number" min="1" max="10" value={concurrency} onChange={event => setConcurrency(event.target.value)} /></label></div>}
-              <footer className="setup-actions">
-                <span className={`connection-status ${status.kind}`}><i />{status.text || "填写配置后可以检查连接"}</span>
-                <div><button className="secondary-action" onClick={testConnection}>测试连接</button><button className="primary-action" onClick={save}>保存并应用</button></div>
-              </footer>
-            </section>
-          </>
-        )}
-      </section>
-    </main>
-  );
+  return <>
+    <SectionHeading title="快速设置" text="连接你的模型服务，即可开始使用" />
+    <section className="quick-setup-card">
+      <div className="form-row provider-row"><label htmlFor="provider">模型服务提供商</label><div className="field-stack"><select id="provider" value={provider} onChange={event => chooseProvider(event.target.value)}><option value="">选择服务商</option>{presets.map(item => <option value={item.name} key={item.name}>{item.name}</option>)}<option value="自定义">自定义 OpenAI 兼容服务</option></select>{links && <div className="provider-links"><a href={links.site} target="_blank" rel="noreferrer">官方网站 ↗</a><a href={links.key} target="_blank" rel="noreferrer">申请 API Key ↗</a><a href={links.docs} target="_blank" rel="noreferrer">官方文档 ↗</a></div>}</div></div>
+      <div className="form-row"><label htmlFor="api-key">API Key</label><div className="password-field"><input id="api-key" type={showKey ? "text" : "password"} value={apiKey} onChange={event => setApiKey(event.target.value)} placeholder="输入后仅保存到本机配置" /><button onClick={() => setShowKey(value => !value)} type="button">{showKey ? "隐藏" : "显示"}</button></div></div>
+      <div className="form-row"><label htmlFor="base-url">Base URL</label><input id="base-url" value={baseUrl} onChange={event => setBaseUrl(event.target.value)} placeholder="https://api.example.com/v1" /></div>
+      <div className="form-row"><label htmlFor="model-name">模型名称</label><input id="model-name" value={model} onChange={event => setModel(event.target.value)} placeholder="输入模型标识" /></div>
+      <button className="advanced-toggle" onClick={() => setAdvanced(value => !value)}><span>高级选项</span><span>{advanced ? "⌃" : "⌄"}</span></button>
+      {advanced && <div className="advanced-grid"><label>上下文长度<input value={context} onChange={event => setContext(event.target.value)} /></label><label>请求超时（秒）<input value={timeout} onChange={event => setTimeoutValue(event.target.value)} /></label><label>最大并发数<input type="number" min="1" max="10" value={concurrency} onChange={event => setConcurrency(event.target.value)} /></label></div>}
+      <footer className="setup-actions"><span className={`connection-status ${status.kind}`}><i />{status.text || "填写配置后可以检查连接"}</span><div><button className="secondary-action" onClick={testConnection}>测试连接</button><button className="primary-action" onClick={save}>保存并应用</button></div></footer>
+    </section>
+  </>;
+}
+
+function UsageTrend({ items }) {
+  if (!items.length) return <div className="chart-empty"><span>⌁</span><p>产生模型调用后，这里会显示真实趋势</p></div>;
+  const width = 920, height = 260, pad = 26;
+  const values = items.map(item => Number(item.input || 0) + Number(item.output || 0));
+  const max = Math.max(...values, 1);
+  const pointList = values.map((value, index) => {
+    const x = pad + index * ((width - pad * 2) / Math.max(1, values.length - 1));
+    const y = height - pad - value / max * (height - pad * 2);
+    return [x, y];
+  });
+  const points = pointList.map(([x, y]) => `${x},${y}`).join(" ");
+  const area = `M ${pad} ${height - pad} L ${pointList.map(([x, y]) => `${x} ${y}`).join(" L ")} L ${width - pad} ${height - pad} Z`;
+  return <div className="usage-chart"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Token 使用趋势"><defs><linearGradient id="usage-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--sage-4)" stopOpacity=".28"/><stop offset="1" stopColor="var(--sage-4)" stopOpacity="0"/></linearGradient></defs><path d={area} fill="url(#usage-fill)"/><polyline points={points} fill="none" stroke="var(--sage-4)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>{points.split(" ").map((point, index) => { const [cx, cy] = point.split(","); return <circle key={items[index]?.time || index} cx={cx} cy={cy} r="4" fill="var(--cream-0)" stroke="var(--sage-4)" strokeWidth="3"/>; })}</svg><div className="chart-labels"><span>{items[0]?.time?.slice(5) || ""}</span><span>{items[items.length - 1]?.time?.slice(5) || ""}</span></div></div>;
+}
+
+function UsagePanel({ api }) {
+  const [data, setData] = useState(null);
+  const [tab, setTab] = useState("records");
+  const [filters, setFilters] = useState({ provider: "", model: "", status: "" });
+  const [error, setError] = useState("");
+  const load = useCallback(() => {
+    const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value));
+    apiJson(`${api}/usage?${query}`).then(setData).catch(event => setError(event.message));
+  }, [api, filters]);
+  useEffect(() => { load(); }, [load]);
+  const summary = data?.summary || {};
+  const rows = tab === "providers" ? data?.providers || [] : tab === "models" ? data?.models || [] : data?.records || [];
+  return <>
+    <SectionHeading title="用量统计" text="所有数字都来自本机 Provider 调用日志" actions={<button className="secondary-action compact-action" onClick={load}>刷新</button>} />
+    {error && <div className="settings-alert error">{error}</div>}
+    <div className="usage-filter-row"><select value={filters.provider} onChange={event => setFilters(value => ({ ...value, provider: event.target.value }))}><option value="">全部来源</option>{(data?.filters?.providers || []).map(value => <option key={value}>{value}</option>)}</select><select value={filters.model} onChange={event => setFilters(value => ({ ...value, model: event.target.value }))}><option value="">全部模型</option>{(data?.filters?.models || []).map(value => <option key={value}>{value}</option>)}</select><select value={filters.status} onChange={event => setFilters(value => ({ ...value, status: event.target.value }))}><option value="">全部状态</option>{(data?.filters?.statuses || []).map(value => <option key={value}>{value}</option>)}</select></div>
+    <section className="usage-overview">
+      <div className="usage-primary"><span className="metric-symbol">↯</span><div><small>真实消耗 Tokens</small><strong>{formatNumber(summary.total_tokens)}</strong><span>{formatNumber(summary.requests)} 次请求</span></div></div>
+      <div className="usage-cost">
+        <small>总费用</small>
+        <strong>{summary.cost === null || summary.cost === undefined ? "费用暂未估算" : `$${summary.cost}`}</strong>
+        {(summary.cost === null || summary.cost === undefined) && <span>未配置模型单价，Token 统计不受影响</span>}
+      </div>
+      <div className="usage-mini-grid"><article><small>输入</small><strong>{formatNumber(summary.input_tokens)}</strong></article><article><small>输出</small><strong>{formatNumber(summary.output_tokens)}</strong></article><article><small>缓存命中</small><strong>{formatNumber(summary.cached_tokens)}</strong></article><article><small>成功率</small><strong>{formatNumber(summary.success_rate)}%</strong></article></div>
+    </section>
+    <section className="usage-trend-card"><header><div><h2>使用趋势</h2><p>输入与输出 Token 的确定性汇总</p></div><span>{summary.damaged_records ? `${summary.damaged_records} 条损坏记录已跳过` : "日志完整"}</span></header><UsageTrend items={data?.trend || []} /></section>
+    <section className="usage-detail-card"><div className="usage-tabs"><button className={tab === "records" ? "active" : ""} onClick={() => setTab("records")}>请求日志</button><button className={tab === "providers" ? "active" : ""} onClick={() => setTab("providers")}>Provider 统计</button><button className={tab === "models" ? "active" : ""} onClick={() => setTab("models")}>模型统计</button></div>{tab === "records" ? <div className="usage-table"><div className="usage-table-head"><span>时间</span><span>提供商 / 模型</span><span>输入</span><span>输出</span><span>耗时</span><span>费用</span><span>状态</span></div>{rows.map(item => <div className="usage-table-row" key={item.call_id || `${item.run_id}-${item.time}`}><time>{formatDate(item.time)}</time><span><strong>{item.provider}</strong><small>{item.model}</small></span><span>{formatNumber(item.input_tokens)}</span><span>{formatNumber(item.output_tokens)}</span><span>{(item.duration_ms / 1000).toFixed(1)}s</span><span title={item.priced ? "" : "未配置该模型单价"}>{item.priced ? `$${item.cost}` : "未估算"}</span><span className={`usage-status ${item.status}`}>{item.status}</span></div>)}{!rows.length && <div className="usage-empty-row">暂无调用记录</div>}</div> : <div className="aggregate-grid">{rows.map(item => <article key={item.name}><span>{item.name}</span><strong>{formatNumber(item.tokens)} Tokens</strong><small>{item.requests} 次请求 · {(item.duration_ms / 1000).toFixed(1)} 秒</small></article>)}{!rows.length && <div className="usage-empty-row">暂无统计</div>}</div>}</section>
+  </>;
+}
+
+function DataSourcesPanel({ api }) {
+  const [sources, setSources] = useState([]);
+  const [formOpen, setFormOpen] = useState(false);
+  const [form, setForm] = useState({ kind: "free", name: "", base_url: "", username: "", password: "" });
+  const [status, setStatus] = useState({ kind: "", text: "" });
+  const [deleteId, setDeleteId] = useState("");
+  const load = useCallback(() => apiJson(`${api}/data-sources`).then(setSources).catch(error => setStatus({ kind: "error", text: error.message })), [api]);
+  useEffect(() => { load(); }, [load]);
+  const mutate = async (url, body) => { await apiJson(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) }); await load(); };
+  const save = async event => {
+    event.preventDefault(); setStatus({ kind: "checking", text: "正在保存数据源…" });
+    try { await mutate(`${api}/data-sources`, form); setForm({ kind: "free", name: "", base_url: "", username: "", password: "" }); setFormOpen(false); setStatus({ kind: "success", text: "数据源已保存在本机" }); }
+    catch (error) { setStatus({ kind: "error", text: error.message }); }
+  };
+  const toggle = async source => { try { await mutate(`${api}/data-sources/${source.id}`, { enabled: !source.enabled }); } catch (error) { setStatus({ kind: "error", text: error.message }); } };
+  const check = async source => { setStatus({ kind: "checking", text: `正在检测 ${source.name}…` }); try { const value = await apiJson(`${api}/data-sources/${source.id}/check`, { method: "POST" }); await load(); setStatus({ kind: value.status === "available" ? "success" : "error", text: value.status_message }); } catch (error) { setStatus({ kind: "error", text: error.message }); } };
+  const remove = async id => { try { await mutate(`${api}/data-sources/${id}/delete`); setDeleteId(""); setStatus({ kind: "success", text: "数据源和本机凭据已删除" }); } catch (error) { setStatus({ kind: "error", text: error.message }); } };
+  return <>
+    <SectionHeading title="学术数据源" text="管理 Agent 可以访问的公开来源和本机付费来源" actions={<button className="primary-action compact-action" onClick={() => setFormOpen(value => !value)}>＋ 新增数据源</button>} />
+    {status.text && <div className={`settings-alert ${status.kind}`}>{status.text}</div>}
+    {formOpen && <form className="source-form" onSubmit={save}><header><div><h2>新增数据源</h2><p>免费来源用于限定域名检索；付费凭据只在本机加密保存</p></div><button type="button" onClick={() => setFormOpen(false)}>×</button></header><div className="source-kind-switch"><button type="button" className={form.kind === "free" ? "active" : ""} onClick={() => setForm(value => ({ ...value, kind: "free" }))}>免费来源</button><button type="button" className={form.kind === "paid" ? "active" : ""} onClick={() => setForm(value => ({ ...value, kind: "paid" }))}>付费来源</button></div><label>数据源名称<input required value={form.name} onChange={event => setForm(value => ({ ...value, name: event.target.value }))} placeholder="例如：实验室论文库" /></label><label>网站或接口地址<input required type="url" value={form.base_url} onChange={event => setForm(value => ({ ...value, base_url: event.target.value }))} placeholder="https://example.org" /></label>{form.kind === "paid" && <div className="paid-fields"><label>账号<input required value={form.username} onChange={event => setForm(value => ({ ...value, username: event.target.value }))} autoComplete="off" /></label><label>密码<input required type="password" value={form.password} onChange={event => setForm(value => ({ ...value, password: event.target.value }))} autoComplete="new-password" /></label></div>}<footer><span>{form.kind === "paid" ? "使用当前 Windows 用户加密，暂不自动登录外部网站" : "保存后 Agent 可在网页检索中限定该域名"}</span><button className="primary-action">保存数据源</button></footer></form>}
+    <div className="source-list">{sources.map(source => <article className={`source-card ${source.enabled ? "" : "disabled"}`} key={source.id}><div className="source-brand"><span>{source.name.slice(0, 2)}</span><div><h3>{source.name}</h3><p>{source.built_in ? `内置连接器 · ${source.connector}` : source.kind === "paid" ? "付费来源 · 本机凭据" : "免费网页来源"}</p></div></div><div className="source-url">{source.base_url}</div><div className={`source-health ${source.status}`}><i />{source.status === "available" ? "可访问" : source.status === "unavailable" ? "连接失败" : "未检测"}<small>{source.last_checked_at ? formatDate(source.last_checked_at) : ""}</small></div>{source.has_credentials && <span className="credential-chip">{source.username} · {source.masked_secret}</span>}<div className="source-actions"><button onClick={() => check(source)}>检测</button><button onClick={() => toggle(source)}>{source.enabled ? "停用" : "启用"}</button>{!source.built_in && (deleteId === source.id ? <span className="inline-confirm"><button className="danger-text" onClick={() => remove(source.id)}>确认删除</button><button onClick={() => setDeleteId("")}>取消</button></span> : <button className="danger-text" onClick={() => setDeleteId(source.id)}>删除</button>)}</div></article>)}</div>
+  </>;
+}
+
+function applyTheme(colors) {
+  const root = document.documentElement;
+  root.style.setProperty("--page-bg", colors.page);
+  root.style.setProperty("--cream-0", colors.surface);
+  root.style.setProperty("--cream-1", colors.page);
+  root.style.setProperty("--sage-1", colors.soft);
+  root.style.setProperty("--sage-4", colors.accent);
+  root.style.setProperty("--sage-5", colors.strong);
+  root.style.setProperty("--cocoa", colors.text);
+  root.style.setProperty("--muted", colors.muted);
+  root.style.setProperty("--line", colors.line);
+}
+
+function ThemePanel() {
+  const [selected, setSelected] = useState(() => localStorage.getItem("research-agent-palette") || PALETTES[0].name);
+  const [custom, setCustom] = useState(() => { try { return JSON.parse(localStorage.getItem("research-agent-custom-theme")) || PALETTES[0].colors; } catch { return PALETTES[0].colors; } });
+  useEffect(() => { const palette = PALETTES.find(item => item.name === selected); applyTheme(palette?.colors || custom); }, [custom, selected]);
+  const choose = palette => { setSelected(palette.name); localStorage.setItem("research-agent-palette", palette.name); localStorage.setItem("research-agent-theme-colors", JSON.stringify(palette.colors)); applyTheme(palette.colors); };
+  const update = (key, value) => { const next = { ...custom, [key]: value }; setCustom(next); setSelected("custom"); localStorage.setItem("research-agent-palette", "custom"); localStorage.setItem("research-agent-custom-theme", JSON.stringify(next)); localStorage.setItem("research-agent-theme-colors", JSON.stringify(next)); };
+  const reset = () => { setCustom(PALETTES[0].colors); choose(PALETTES[0]); localStorage.removeItem("research-agent-custom-theme"); };
+  return <><SectionHeading title="色彩设计" text="选择让你长时间工作也感到舒服的色彩盘" actions={<button className="secondary-action compact-action" onClick={reset}>恢复默认</button>} /><div className="palette-grid">{PALETTES.map(palette => <button className={`palette-card ${selected === palette.name ? "active" : ""}`} key={palette.name} onClick={() => choose(palette)}><span className="palette-preview">{Object.values(palette.colors).slice(0, 5).map(color => <i key={color} style={{ background: color }} />)}</span><strong>{palette.name}</strong><small>{palette.note}</small></button>)}</div><section className="custom-theme-card"><header><div><h2>自定义色彩盘</h2><p>修改后立即作用于整个工作台</p></div>{selected === "custom" && <span>正在使用</span>}</header><div className="color-fields">{[["page", "页面背景"], ["surface", "卡片背景"], ["soft", "柔和底色"], ["accent", "强调色"], ["text", "主要文字"], ["line", "边框颜色"]].map(([key, label]) => <label key={key}><span>{label}</span><input type="color" value={custom[key]} onChange={event => update(key, event.target.value)} /><code>{custom[key]}</code></label>)}</div></section></>;
+}
+
+function Toggle({ checked, onChange, label, text, disabled = false }) {
+  return <label className={`privacy-row ${disabled ? "disabled" : ""}`}><div><strong>{label}</strong><p>{text}</p></div><input type="checkbox" checked={checked} onChange={event => onChange(event.target.checked)} disabled={disabled} /><span className="toggle-track"><i /></span></label>;
+}
+
+function PrivacyPanel({ api }) {
+  const [privacy, setPrivacy] = useState({ external_network_access: true, approval_required: true, log_retention_days: 30, mask_credentials: true });
+  const [approvals, setApprovals] = useState([]);
+  const [status, setStatus] = useState({ kind: "", text: "" });
+  const [confirmClear, setConfirmClear] = useState(false);
+  const load = useCallback(() => Promise.all([apiJson(`${api}/settings/privacy`), apiJson(`${api}/settings/approvals`)]).then(([settings, items]) => { setPrivacy(settings); setApprovals(items); }).catch(error => setStatus({ kind: "error", text: error.message })), [api]);
+  useEffect(() => { load(); }, [load]);
+  const save = async () => { setStatus({ kind: "checking", text: "正在保存并应用策略…" }); try { const value = await apiJson(`${api}/settings/privacy`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(privacy) }); setPrivacy(value); setStatus({ kind: "success", text: `策略已生效${value.pruned_records ? `，清理 ${value.pruned_records} 条过期日志` : ""}` }); } catch (error) { setStatus({ kind: "error", text: error.message }); } };
+  const clear = async () => { try { const value = await apiJson(`${api}/settings/clear-logs`, { method: "POST" }); setConfirmClear(false); setStatus({ kind: "success", text: `已清空 ${value.cleared_files} 个调用日志文件` }); } catch (error) { setStatus({ kind: "error", text: error.message }); } };
+  return <><SectionHeading title="权限与隐私" text="控制外部访问、人工审批和本地日志" actions={<button className="primary-action compact-action" onClick={save}>保存策略</button>} />{status.text && <div className={`settings-alert ${status.kind}`}>{status.text}</div>}<section className="privacy-card"><Toggle checked={privacy.external_network_access} onChange={value => setPrivacy(item => ({ ...item, external_network_access: value }))} label="允许外部网络访问" text="关闭后，文献检索、网页访问和数据源检测会被后端阻止" /><Toggle checked={privacy.approval_required} onChange={value => setPrivacy(item => ({ ...item, approval_required: value }))} label="敏感操作需要人工确认" text="保持开启时，Agent 会显示允许 / 拒绝卡片后才继续" /><Toggle checked={true} onChange={() => {}} disabled label="凭据始终脱敏" text="API Key 和付费数据源密码不会通过普通接口返回明文" /><label className="retention-row"><div><strong>调用日志保留时间</strong><p>保存设置时会清理早于该期限的 Provider 日志</p></div><input type="number" min="1" max="3650" value={privacy.log_retention_days} onChange={event => setPrivacy(item => ({ ...item, log_retention_days: event.target.value }))} /><span>天</span></label></section><section className="approval-history"><header><div><h2>最近审批记录</h2><p>允许和拒绝都保存在对应会话中</p></div><button onClick={load}>刷新</button></header><div>{approvals.slice(0, 12).map((item, index) => <article key={`${item.run_id}-${item.time}-${index}`}><span className={item.event === "approval_resolved" ? (item.approved ? "approved" : "rejected") : "waiting"}>{item.event === "approval_requested" ? "待确认" : item.approved ? "已允许" : "已拒绝"}</span><p><strong>{item.skill || "Agent 操作"}</strong><small>{item.summary || "无摘要"}</small></p><time>{formatDate(item.time)}</time></article>)}{!approvals.length && <div className="usage-empty-row">暂无审批记录</div>}</div></section><section className="danger-zone"><div><h2>清理用量日志</h2><p>只清空 Provider 调用统计，不删除会话和科研成果。</p></div>{confirmClear ? <span className="inline-confirm"><button className="danger-action" onClick={clear}>确认清空</button><button onClick={() => setConfirmClear(false)}>取消</button></span> : <button className="danger-action" onClick={() => setConfirmClear(true)}>清理日志</button>}</section></>;
+}
+
+function AccountPanel({ api, onAccountChange }) {
+  const [account, setAccount] = useState({ display_name: "", institution: "", email: "", title: "", bio: "", avatar: "" });
+  const [status, setStatus] = useState({ kind: "", text: "" });
+  useEffect(() => { apiJson(`${api}/settings/account`).then(setAccount).catch(error => setStatus({ kind: "error", text: error.message })); }, [api]);
+  const save = async event => { event.preventDefault(); setStatus({ kind: "checking", text: "正在保存…" }); try { const value = await apiJson(`${api}/settings/account`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(account) }); setAccount(value); onAccountChange?.(value); setStatus({ kind: "success", text: "账号资料已保存在本机" }); } catch (error) { setStatus({ kind: "error", text: error.message }); } };
+  const set = key => event => setAccount(value => ({ ...value, [key]: event.target.value }));
+  const initials = (account.display_name || "研").slice(0, 2);
+  return <><SectionHeading title="账号信息" text="用于本机工作台展示，暂不连接外部用户系统" />{status.text && <div className={`settings-alert ${status.kind}`}>{status.text}</div>}<form className="account-card" onSubmit={save}><aside><span>{initials}</span><strong>{account.display_name || "本地科研用户"}</strong><small>Local profile</small></aside><div className="account-fields"><label>显示名称<input value={account.display_name} onChange={set("display_name")} placeholder="你的名称" /></label><label>单位 / 实验室<input value={account.institution} onChange={set("institution")} placeholder="学校、医院或实验室" /></label><label>邮箱<input type="email" value={account.email} onChange={set("email")} placeholder="仅保存在本机" /></label><label>职称 / 身份<input value={account.title} onChange={set("title")} placeholder="研究生、研究员、教师…" /></label><label className="wide-field">简介<textarea rows="5" value={account.bio} onChange={set("bio")} placeholder="研究方向或个人说明" /></label><footer className="wide-field"><span>后续接入外部账号系统时再增加登录、同步与服务器校验。</span><button className="primary-action">保存账号信息</button></footer></div></form></>;
+}
+
+export default function SettingsPage({ api, onAccountChange }) {
+  const [section, setSection] = useState("quick");
+  return <main className="settings-page page-frame"><aside className="settings-nav">{SECTIONS.map(([key, icon, label]) => <button key={key} className={section === key ? "active" : ""} onClick={() => setSection(key)}><span>{icon}</span>{label}</button>)}</aside><section className="settings-content">{section === "quick" && <QuickSetup api={api} />}{section === "usage" && <UsagePanel api={api} />}{section === "sources" && <DataSourcesPanel api={api} />}{section === "theme" && <ThemePanel />}{section === "privacy" && <PrivacyPanel api={api} />}{section === "account" && <AccountPanel api={api} onAccountChange={onAccountChange} />}</section></main>;
 }
