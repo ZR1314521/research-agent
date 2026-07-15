@@ -189,6 +189,7 @@ export default function App() {
   const [tokenLimit, setTokenLimit] = useState(1000000);
   const [account, setAccount] = useState(null);
   const abortRef = useRef(null);
+  const runIdRef = useRef("");
   const generationRef = useRef(0);
   const sequenceRef = useRef(0);
   const turnIdRef = useRef("");
@@ -241,9 +242,14 @@ export default function App() {
     loadSessions();
   }, [loadSessions]);
 
-  const applyRun = useCallback((run, { replaceMessages = true } = {}) => {
+  const applyRun = useCallback((run, { replaceMessages = true, adoptRun = false } = {}) => {
     if (!run) return;
-    if (run.run_id) { setRunId(run.run_id); loadSessions(); }
+    if (run.run_id && !adoptRun && run.run_id !== runIdRef.current) return;
+    if (run.run_id && adoptRun) {
+      runIdRef.current = run.run_id;
+      setRunId(run.run_id);
+    }
+    if (run.run_id) loadSessions();
     setArtifacts(run.artifacts || {});
     if (run.context_size !== undefined) setTokenUsage(run.context_size);
     if (run.window_size) setTokenLimit(run.window_size);
@@ -264,14 +270,14 @@ export default function App() {
 
   const refreshRun = useCallback(async (id, opts) => {
     if (!id) return null;
+    const generation = generationRef.current;
     const response = await fetch(`${API}/runs/${encodeURIComponent(id)}`);
     if (!response.ok) throw new Error((await response.json()).detail || response.statusText);
     const run = await response.json();
+    if (id !== runIdRef.current || generation !== generationRef.current) return null;
     applyRun(run, opts);
     return run;
   }, [applyRun]);
-
-  useEffect(() => { if (runId) refreshRun(runId).catch(() => {}); }, [runId, refreshRun]);
 
   const scrollDown = () => requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }));
   const updateAgent = useCallback(updater => {
@@ -336,6 +342,39 @@ export default function App() {
     if (buffer.trim()) { try { handleEvent(JSON.parse(buffer), generation); } catch {} }
   }, [handleEvent]);
 
+  const reconnectSelectedTurn = useCallback(async (run, generation) => {
+    const selectedRunId = run?.run_id;
+    const selectedTurnId = run?.active_turn?.turn_id;
+    if (!selectedRunId || !selectedTurnId || selectedRunId !== runIdRef.current || generation !== generationRef.current) return;
+
+    const controller = new AbortController();
+    abortRef.current = controller; sequenceRef.current = 0; turnIdRef.current = selectedTurnId;
+    setActiveTurnId(selectedTurnId); setTurnState(run.active_turn.status || "running");
+    setMessages(previous => [...previous, { role: "agent", content: "", steps: [], calls: [], artifacts: {}, streaming: true }]);
+    try {
+      const response = await fetch(`${API}/runs/${encodeURIComponent(selectedRunId)}/turns/${encodeURIComponent(selectedTurnId)}/events?after=0`, { signal: controller.signal });
+      await consume(response, generation);
+    } catch (eventError) {
+      if (eventError.name !== "AbortError" && selectedRunId === runIdRef.current && generation === generationRef.current) {
+        setError(`${eventError.message}。后台任务仍在运行，重新打开会话即可再次连接。`);
+      }
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null;
+    }
+  }, [consume]);
+
+  useEffect(() => {
+    if (!runId) return undefined;
+    let disposed = false;
+    const generation = generationRef.current;
+    refreshRun(runId).then(run => {
+      if (!disposed && run?.active_turn?.turn_id) reconnectSelectedTurn(run, generation);
+    }).catch(eventError => {
+      if (!disposed && runId === runIdRef.current && generation === generationRef.current) setError(eventError.message);
+    });
+    return () => { disposed = true; };
+  }, [reconnectSelectedTurn, refreshRun, runId]);
+
   const startTurn = useCallback(async (text, showUser = true) => {
     const value = text.trim();
     if (!runId || !value || busy) return;
@@ -367,23 +406,25 @@ export default function App() {
   }, [apiVersion, busy, consume, runId, updateAgent]);
 
   const switchSession = id => {
-    if (id === runId || busy) return;
+    if (id === runIdRef.current) return;
+    generationRef.current += 1; runIdRef.current = id;
     abortRef.current?.abort(); abortRef.current = null; setRunId(id);
     setMessages([]); setArtifacts({}); setError(""); setPendingApproval(null); setPlanActive(false);
-    setTurnState("idle"); setActiveTurnId(""); sequenceRef.current = 0; turnIdRef.current = ""; generationRef.current += 1;
-    refreshRun(id).catch(eventError => setError(eventError.message));
+    setTurnState("idle"); setActiveTurnId(""); sequenceRef.current = 0; turnIdRef.current = "";
   };
 
   const newRun = useCallback(async () => {
-    const oldRun = runId; generationRef.current += 1; abortRef.current?.abort(); abortRef.current = null;
-    if (oldRun) fetch(`${API}/runs/${encodeURIComponent(oldRun)}/cancel`, { method: "POST" }).catch(() => {});
+    generationRef.current += 1; const generation = generationRef.current;
+    abortRef.current?.abort(); abortRef.current = null;
     setError(""); setMessages([]); setArtifacts({}); setFiles([]); setPendingApproval(null); setPlanActive(false); setTurnState("idle"); setActiveTurnId(""); sequenceRef.current = 0; turnIdRef.current = "";
     try {
       const response = await fetch(`${API}/runs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ run_id: "" }) });
       if (!response.ok) throw new Error((await response.json()).detail || response.statusText);
-      applyRun(await response.json());
+      const created = await response.json();
+      if (generation !== generationRef.current) return;
+      applyRun(created, { adoptRun: true });
     } catch (eventError) { setError(eventError.message); }
-  }, [applyRun, runId]);
+  }, [applyRun]);
 
   useEffect(() => { if (page === "workspace" && !runId) newRun(); }, [newRun, page, runId]);
 
@@ -443,7 +484,10 @@ export default function App() {
     if (!selectedSessions.size) { setDeleteMode(false); return; }
     const ids = [...selectedSessions];
     await Promise.all(ids.map(id => fetch(`${API}/runs/${encodeURIComponent(id)}/delete`, { method: "POST" }).catch(() => {})));
-    if (ids.includes(runId)) { setRunId(""); setMessages([]); }
+    if (ids.includes(runId)) {
+      generationRef.current += 1; runIdRef.current = "";
+      setRunId(""); setMessages([]);
+    }
     setSelectedSessions(new Set()); setDeleteMode(false); loadSessions();
   };
 
@@ -456,7 +500,6 @@ export default function App() {
   };
 
   const openTask = id => {
-    if (busy && id !== runId) { navigate("workspace"); setError("当前任务仍在运行，请先暂停或结束后再切换会话。"); return; }
     if (id !== runId) switchSession(id);
     navigate("workspace");
   };

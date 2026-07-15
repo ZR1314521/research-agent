@@ -232,9 +232,11 @@ class LiteratureService:
             paper["screening_reasons"] = reasons
             paper["missing_required_terms"] = missing_required
             paper["matched_required_terms"] = [term for term in concepts if term not in missing_required]
-            if reason or score < 35:
-                paper["exclusion_reason"] = reason or "score_below_threshold"
-                if reason.startswith("missing_required_terms") and score >= 25:
+            # The score ranks evidence but never vetoes explicit criteria.
+            # Hard exclusion comes only from user/model supplied constraints.
+            if reason:
+                paper["exclusion_reason"] = reason
+                if reason.startswith("missing_required_terms") and paper["matched_required_terms"]:
                     edge.append(paper)
                 else:
                     excluded.append(paper)

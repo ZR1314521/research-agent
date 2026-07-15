@@ -28,12 +28,11 @@ class PromptRuntime:
         bounds without being told what to do."""
         parts = [
             "你运行在一个本地工作台中。你可以调用的工具列在每条消息的 tool list 里。",
+            "当前消息优先于旧任务。已有成果足以支持当前请求时优先复用；是否复用由你根据当前目标和证据判断，不按预设工具流程推进。",
             "工具执行结果是持久化的——产物文件保存在会话目录下，可以在后续步骤中引用。",
             "当工具返回大量数据时，系统会自动裁剪并保存完整结果到磁盘。模型只收到精简引用，需要时可以再读取。",
             "对话较长时系统会自动压缩较早部分，保留关键信息。这是透明的，你不需要干预。",
         ]
-        if session is not None:
-            parts.append(self._session_context(session))
         return "\n".join(parts)
 
     def _session_context(self, session: Any) -> str:
@@ -72,10 +71,14 @@ class PromptRuntime:
         layers = [
             self._identity(),
             "",
-            self._harness(session),
+            self._harness(None),
             self._data_sources(),
         ]
         return "\n".join(part for part in layers if part).strip()
+
+    def runtime_context(self, session: Any | None) -> str:
+        """Dynamic state appended at the conversation tail, not the cache prefix."""
+        return self._session_context(session) if session is not None else ""
 
     def tools_for_llm(self, read_only: bool = False) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []

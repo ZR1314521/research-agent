@@ -8,11 +8,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from research_agent.config import AgentConfig
+from research_agent.context import ContextManager
 from research_agent.core.agent import AgentLoop
 from research_agent.core.contracts import ContractError, register_artifacts, validate_result_quality
 from research_agent.core.prompt_runtime import PromptRuntime
 from research_agent.chat import ResearchChatAgent
 from research_agent.capabilities.files import FileService
+from research_agent.capabilities.literature import LiteratureService
 from research_agent.capabilities.references import ReferenceService
 from research_agent.capabilities.writing import WritingService
 from research_agent.session import ChatSession, SessionStore
@@ -115,6 +117,192 @@ class AgentCoreTests(unittest.TestCase):
         self.assertIn("tool_observed", [event["event"] for event in self.session.events])
         self.assertEqual(self.session.model_messages[-2]["role"], "tool")
 
+    def test_large_tool_observation_is_compact_even_when_total_context_has_room(self) -> None:
+        manager = ContextManager(
+            self.sessions.directory(self.session.session_id),
+            context_window=1_000_000,
+            context_budget=200_000,
+            observation_budget=4_000,
+        )
+        observation = manager.observation(
+            tool="academic-search-multisource",
+            message="找到 12 篇论文。",
+            data={"papers": [{"abstract": "evidence " * 50_000}]},
+            artifacts={"active_papers": "screened_papers.json"},
+            messages=[{"role": "user", "content": "分析研究趋势"}],
+        )
+
+        self.assertNotIn("data", observation)
+        self.assertIn("data_ref", observation)
+        self.assertLessEqual(manager.estimate_tokens(observation), 4_000)
+        self.assertTrue(Path(observation["data_ref"]).exists())
+
+    def test_request_budget_includes_fixed_prompt_and_output_reserve(self) -> None:
+        manager = ContextManager(
+            self.sessions.directory(self.session.session_id),
+            context_window=10_000,
+            context_budget=1_000,
+        )
+        messages = [
+            {"role": "user", "content": "分析这些结果"},
+            {
+                "role": "tool",
+                "tool_call_id": "call-large",
+                "content": json.dumps({"message": "完成", "data": {"raw": "x" * 2_400}}),
+            },
+        ]
+        fixed = {"system": "policy " * 180, "tools": [{"schema": "y" * 600}]}
+
+        fitted = manager.fit_to_budget(
+            messages,
+            fixed_context=fixed,
+            reserve_tokens=200,
+        )
+
+        payload = json.loads(fitted[-1]["content"])
+        self.assertNotIn("data", payload)
+        self.assertLessEqual(
+            manager.estimate_tokens(fitted) + manager.estimate_tokens(fixed) + 200,
+            1_000,
+        )
+
+    def test_fallback_token_estimate_is_conservative_for_json_payloads(self) -> None:
+        english_payload = {"abstracts": "x" * 367_000}
+        chinese_payload = {"摘要": "抑郁症脑电研究" * 10_000}
+
+        self.assertGreaterEqual(ContextManager.estimate_tokens(english_payload), 120_000)
+        self.assertGreaterEqual(ContextManager.estimate_tokens(chinese_payload), 70_000)
+
+    def test_fitted_cjk_text_respects_the_configured_budget(self) -> None:
+        manager = ContextManager(
+            self.sessions.directory(self.session.session_id),
+            context_budget=1_000,
+        )
+
+        fitted = manager.fit_text("抑郁症脑电研究" * 10_000, label="cjk-regression")
+
+        self.assertLessEqual(manager.estimate_tokens(fitted), 1_000)
+        self.assertIn("Complete source:", fitted)
+
+    def test_large_failed_tool_payload_is_externalized_too(self) -> None:
+        manager = ContextManager(
+            self.sessions.directory(self.session.session_id),
+            context_budget=32_000,
+            observation_budget=1_000,
+        )
+        payload = {
+            "ok": False,
+            "tool": "web-search",
+            "error": "remote trace " * 20_000,
+            "error_code": "remote_failure",
+        }
+
+        compact = manager.tool_payload(
+            payload,
+            messages=[{"role": "user", "content": "search"}],
+        )
+
+        self.assertEqual(compact["ok"], False)
+        self.assertEqual(compact["error_code"], "remote_failure")
+        self.assertIn("data_ref", compact)
+        self.assertLessEqual(manager.estimate_tokens(compact), 1_000)
+
+    def test_exploratory_search_ranks_low_score_papers_without_hard_excluding_them(self) -> None:
+        service = LiteratureService(
+            self.config,
+            self.sessions.directory(self.session.session_id),
+        )
+        papers = [{
+            "title": "EEG representation learning in clinical cohorts",
+            "abstract": "A small exploratory neural representation study.",
+            "year": 2024,
+            "venue": "Clinical Neuroinformatics",
+            "doi": "10.1/exploratory",
+        }]
+
+        included, excluded, edge = service.screen_with_edge(
+            papers,
+            "EEG MDD Transformer",
+            2020,
+            2026,
+            [],
+            [],
+            [],
+            False,
+        )
+
+        self.assertEqual(len(included), 1)
+        self.assertFalse(excluded)
+        self.assertFalse(edge)
+
+    def test_explicit_screening_criteria_are_not_vetoed_by_a_score_threshold(self) -> None:
+        service = LiteratureService(
+            self.config,
+            self.sessions.directory(self.session.session_id),
+        )
+        paper = {
+            "title": "Clinical cohort representation study",
+            "abstract": "A small clinical investigation.",
+            "year": 2024,
+            "keywords": [
+                {"display_name": "EEG"},
+                {"display_name": "MDD"},
+                {"display_name": "Transformer"},
+            ],
+        }
+
+        included, excluded, edge = service.screen_with_edge(
+            [paper],
+            "EEG MDD Transformer",
+            2020,
+            2026,
+            [],
+            ["EEG", "MDD", "Transformer"],
+            [],
+            True,
+        )
+
+        self.assertEqual(len(included), 1)
+        self.assertFalse(excluded)
+        self.assertFalse(edge)
+
+    def test_large_tool_payload_is_not_duplicated_in_session_state(self) -> None:
+        loop = AgentLoop(
+            self.config,
+            self.registry,
+            self.sessions,
+            self.sessions.directory(self.session.session_id),
+        )
+        responses = iter([
+            tool_response("academic-search-multisource", {"query": "EEG MDD"}),
+            text_response("趋势分析完成。"),
+        ])
+        loop.executor.execute = lambda *_args: {
+            "message": "找到 12 篇论文。",
+            "artifacts": {"active_papers": str(self.tmp / "screened_papers.json")},
+            "data": {"papers": [{"abstract": "large evidence " * 50_000}]},
+        }
+
+        requests: list[list[dict]] = []
+
+        def chat(_operation, messages, **_kwargs):
+            requests.append(json.loads(json.dumps(messages, ensure_ascii=False)))
+            return next(responses)
+
+        with patch.object(loop.client, "chat", side_effect=chat):
+            result = loop.run(self.session, "分析 EEG MDD 方法趋势")
+
+        self.assertEqual(result.message, "趋势分析完成。")
+        self.assertNotIn("data", self.session.observations[-1])
+        self.assertIn("data_ref", self.session.observations[-1])
+        self.assertNotIn("papers", self.session.metadata["last_result"])
+        self.assertTrue(Path(self.session.observations[-1]["data_ref"]).exists())
+        model_tool_payload = json.loads(
+            next(message["content"] for message in requests[1] if message["role"] == "tool")
+        )
+        self.assertNotIn("data", model_tool_payload)
+        self.assertIn("data_ref", model_tool_payload)
+
     def test_existing_artifacts_do_not_force_network_confirmation(self) -> None:
         loop = AgentLoop(
             self.config,
@@ -146,6 +334,28 @@ class AgentCoreTests(unittest.TestCase):
         self.assertIn("已有成果", prompt)
         self.assertIn("当前消息优先于旧任务", prompt)
         self.assertTrue(runtime.tools_for_llm())
+
+    def test_dynamic_session_state_does_not_change_system_prompt(self) -> None:
+        runtime = PromptRuntime(self.registry)
+        before = runtime.system(self.session)
+        self.session.artifacts["active_papers"] = "screened_papers.json"
+
+        after = runtime.system(self.session)
+        dynamic = runtime.runtime_context(self.session)
+
+        self.assertEqual(before, after)
+        self.assertIn("active_papers", dynamic)
+
+    def test_plan_safety_is_declared_by_capabilities_not_handler_name_checks(self) -> None:
+        for name in (
+            "reference-format-gbt7714",
+            "20-ml-paper-writing",
+            "doc-coauthoring",
+            "humanizer",
+            "canvas-design",
+            "run-code",
+        ):
+            self.assertTrue(self.registry.get(name).write_access, name)
 
     def test_unconfigured_model_does_not_echo_internal_prompt(self) -> None:
         object.__setattr__(self.config, "llm_api_key", "")

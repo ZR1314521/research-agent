@@ -50,6 +50,7 @@
       "handler": "format_references",
       "planner_visible": true,
       "description": "Format references in Nature, IEEE, APA, ACS, GB/T 7714, and 14 other journal styles. Accepts DOCX, JSON, BibTeX, or RIS input and produces a formatted Word document.",
+      "write_access": true,
       "direct_delivery": true
     },
     {
@@ -71,7 +72,8 @@
       "kind": "prompt",
       "handler": "write_paper_section",
       "planner_visible": true,
-      "description": "Draft evidence-backed ML paper sections from session artifacts."
+      "description": "Draft evidence-backed ML paper sections from session artifacts.",
+      "write_access": true
     },
     {
       "name": "docx",
@@ -105,21 +107,24 @@
       "kind": "prompt",
       "handler": "revise_document",
       "planner_visible": true,
-      "description": "Revise an existing research artifact from user feedback."
+      "description": "Revise an existing research artifact from user feedback.",
+      "write_access": true
     },
     {
       "name": "humanizer",
       "kind": "prompt",
       "handler": "humanize_text",
       "planner_visible": true,
-      "description": "Edit research prose to remove formulaic model language."
+      "description": "Edit research prose to remove formulaic model language.",
+      "write_access": true
     },
     {
       "name": "canvas-design",
       "kind": "prompt",
       "handler": "design_visual",
       "planner_visible": true,
-      "description": "Create a specification for a research diagram or visual asset."
+      "description": "Create a specification for a research diagram or visual asset.",
+      "write_access": true
     },
     {
       "name": "literature-search-openalex",
@@ -257,7 +262,8 @@
       "kind": "tool",
       "handler": "run_code",
       "planner_visible": true,
-      "description": "Execute Python code for data analysis, statistical tests, scientific computing, plotting, and any custom computation. Returns stdout, stderr, and exit code."
+      "description": "Execute Python code for data analysis, statistical tests, scientific computing, plotting, and any custom computation. Returns stdout, stderr, and exit code.",
+      "write_access": true
     },
     {
       "name": "web-fetch",

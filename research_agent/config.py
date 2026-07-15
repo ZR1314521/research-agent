@@ -45,6 +45,9 @@ class AgentConfig:
     llm_retry: int
     provider_max_concurrency: int
     context_window: int
+    context_budget: int
+    context_observation_budget: int
+    context_output_reserve: int
     semantic_scholar_api_key: str
     openalex_mailto: str
     pubmed_email: str
@@ -75,6 +78,15 @@ class AgentConfig:
                 1, int(_value(values, "RESEARCH_AGENT_PROVIDER_MAX_CONCURRENCY", "1"))
             ),
             context_window=max(0, int(_value(values, "RESEARCH_AGENT_CONTEXT_WINDOW", "0"))),
+            context_budget=max(0, int(_value(values, "RESEARCH_AGENT_CONTEXT_BUDGET", "32000"))),
+            context_observation_budget=max(
+                256,
+                int(_value(values, "RESEARCH_AGENT_CONTEXT_OBSERVATION_BUDGET", "4000")),
+            ),
+            context_output_reserve=max(
+                0,
+                int(_value(values, "RESEARCH_AGENT_CONTEXT_OUTPUT_RESERVE", "8000")),
+            ),
             semantic_scholar_api_key=_value(values, "SEMANTIC_SCHOLAR_API_KEY"),
             openalex_mailto=_value(values, "OPENALEX_MAILTO"),
             pubmed_email=_value(values, "PUBMED_EMAIL"),

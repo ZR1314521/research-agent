@@ -106,13 +106,10 @@ class ToolExecutor:
         return policy(arguments) if policy else True
 
     def execute(self, skill_name: str, arguments: dict[str, Any], session: ChatSession) -> dict[str, Any]:
-        if getattr(session, "status", "") == "planning":
-            spec = self.registry.get(skill_name)
-            if spec.write_access or spec.handler in ("document_convert", "export_docx", "create_reading_copy",
-                "acquire_open_access_papers", "run_code", "format_references", "write_paper_section",
-                "revise_document", "humanize_text", "design_visual", "register_files"):
-                raise ValueError("规划模式不允许写操作或下载，请改用搜索或读取工具。")
         spec = self.registry.get(skill_name)
+        if getattr(session, "status", "") == "planning":
+            if spec.write_access:
+                raise ValueError("规划模式不允许写操作或下载，请改用搜索或读取工具。")
         if not spec.handler:
             raise ValueError(f"Skill is design-only and cannot execute directly: {skill_name}")
         privacy = {

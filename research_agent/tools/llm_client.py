@@ -8,7 +8,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from threading import Event
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Iterable, Protocol
 
 from research_agent.config import AgentConfig
 from research_agent.logging import ModelCallLogger
@@ -143,6 +143,8 @@ class OpenAICompatibleProvider:
         )
         with self.semaphore:
             with urllib.request.urlopen(request, timeout=timeout) as response:
+                if on_event is not None:
+                    return self._read_stream_lines(response, on_event)
                 raw = response.read()
                 text = raw.decode("utf-8", errors="replace")
                 # Cloudflare / reverse-proxy challenge pages are HTML, not
@@ -150,12 +152,10 @@ class OpenAICompatibleProvider:
                 # echo raw markup.
                 if text.lstrip().startswith("<!") or text.lstrip().startswith("<html"):
                     raise ValueError("Provider returned HTML (likely a challenge page or proxy block)")
-                if on_event is None:
-                    return json.loads(text)
-                return self._read_stream_lines(text.splitlines(True), on_event)
+                return json.loads(text)
 
     @staticmethod
-    def _read_stream_lines(lines: list[str], on_event: EventSink) -> dict[str, Any]:
+    def _read_stream_lines(lines: Iterable[str | bytes], on_event: EventSink) -> dict[str, Any]:
         content: list[str] = []
         reasoning: list[str] = []
         calls: dict[int, dict[str, Any]] = {}
@@ -163,6 +163,8 @@ class OpenAICompatibleProvider:
         usage: dict[str, Any] = {}
         for raw in lines:
             line = raw.decode("utf-8", errors="replace").strip() if isinstance(raw, bytes) else str(raw).strip()
+            if line.lstrip().lower().startswith(("<!", "<html")):
+                raise ValueError("Provider returned HTML (likely a challenge page or proxy block)")
             if not line or line.startswith(":") or not line.startswith("data:"):
                 continue
             value = line[5:].strip()

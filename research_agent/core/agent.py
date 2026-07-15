@@ -64,7 +64,12 @@ class AgentLoop:
         self.rate_limit_gate = rate_limit_gate
         self.client = LLMClient(config, ModelCallLogger(session_dir), cancel_event)
         self.executor = ToolExecutor(config, registry, session_dir, cancel_event)
-        self.context = ContextManager(session_dir, config.context_window)
+        self.context = ContextManager(
+            session_dir,
+            config.context_window,
+            context_budget=config.context_budget,
+            observation_budget=config.context_observation_budget,
+        )
 
     def run(self, session: ChatSession, user_message: str) -> AgentResult:
         return self._drive(session, self._conversation(session, user_message), user_message, LoopState())
@@ -158,9 +163,12 @@ class AgentLoop:
             if self.pause_gate and not self.pause_gate():
                 return self._cancelled(session, state.last_skill, messages)
 
+            system = self.prompts.system(session)
             messages = self.context.fit_to_budget(
                 messages,
                 summarizer=lambda older: self._summarize_older(older),
+                fixed_context={"system": system, "tools": tools},
+                reserve_tokens=self.config.context_output_reserve,
             )
 
             # Polite pause between turns so providers don't interpret
@@ -176,7 +184,7 @@ class AgentLoop:
                 result = self.client.chat(
                     "agent_turn",
                     messages,
-                    system=self.prompts.system(session),
+                    system=system,
                     tools=tools or None,
                     on_event=self.event_sink,
                 )
@@ -337,7 +345,6 @@ class AgentLoop:
             for key in tool_result.get("artifacts", {}):
                 session.artifact_dependencies[key] = [spec.name]
             session.metadata["last_skill"] = spec.name
-            session.metadata["last_result"] = tool_result.get("data", {})
             full_observation = {
                 "ok": True,
                 "tool": spec.name,
@@ -345,11 +352,15 @@ class AgentLoop:
                 "data": tool_result.get("data", {}),
                 "artifacts": tool_result.get("artifacts", {}),
             }
-            session.observations.append(full_observation)
             observation = self.context.observation(
                 tool=spec.name, message=full_observation["message"], data=full_observation["data"],
                 artifacts=full_observation["artifacts"], messages=messages,
             )
+            persistent_observation = {
+                key: value for key, value in observation.items() if key != "data"
+            }
+            session.observations.append(persistent_observation)
+            session.metadata["last_result"] = persistent_observation
             state.last_success = full_observation["message"] or state.last_success
             if spec.direct_delivery and full_observation["message"]:
                 direct_messages.append(full_observation["message"])
@@ -453,8 +464,12 @@ class AgentLoop:
                     if not msg.get("content"):
                         msg["content"] = "（操作已取消）"
                 break
-        if not messages or messages[-1].get("role") != "user" or messages[-1].get("content") != user_message:
-            messages.append({"role": "user", "content": user_message})
+        runtime_context = self.prompts.runtime_context(session)
+        model_user_message = user_message
+        if runtime_context:
+            model_user_message += f"\n\n<runtime_context>\n{runtime_context}\n</runtime_context>"
+        if not messages or messages[-1].get("role") != "user" or messages[-1].get("content") != model_user_message:
+            messages.append({"role": "user", "content": model_user_message})
         session.model_messages = list(messages)
         return messages
 
@@ -464,7 +479,11 @@ class AgentLoop:
         Uses a minimal, non-streaming LLM call.  On failure, degrades to
         a structural summary so the harness never blocks.
         """
-        transcript = json.dumps(messages, ensure_ascii=False, default=str)
+        transcript = self.context.fit_text(
+            json.dumps(messages, ensure_ascii=False, default=str),
+            label="context-summary-input",
+            reserve_tokens=self.config.context_output_reserve,
+        )
         try:
             result = self.client.complete(
                 "context_summary",
@@ -500,8 +519,8 @@ class AgentLoop:
             return {}, f"Invalid tool arguments: {exc}"
         return (value, "") if isinstance(value, dict) else ({}, "Tool arguments must be a JSON object.")
 
-    @staticmethod
-    def _append_tool_message(messages: list[dict[str, Any]], call_id: str, payload: dict[str, Any]) -> None:
+    def _append_tool_message(self, messages: list[dict[str, Any]], call_id: str, payload: dict[str, Any]) -> None:
+        payload = self.context.tool_payload(payload, messages=messages)
         messages.append({
             "role": "tool",
             "tool_call_id": call_id,
@@ -511,6 +530,18 @@ class AgentLoop:
     def _finish(self, session: ChatSession, message: str, skill: str, model_messages: list[dict[str, Any]]) -> AgentResult:
         if not model_messages or model_messages[-1].get("role") != "assistant" or model_messages[-1].get("content") != message:
             model_messages.append({"role": "assistant", "content": message})
+        # Strip raw data from tool results before persisting to context.
+        # The full result is on disk (tool_observations/); the model only
+        # needs the summary across turn boundaries.
+        for msg in model_messages:
+            if msg.get("role") == "tool":
+                try:
+                    payload = json.loads(msg.get("content", "{}"))
+                    if isinstance(payload, dict) and "data" in payload:
+                        payload.pop("data", None)
+                        msg["content"] = json.dumps(payload, ensure_ascii=False, default=str)
+                except (json.JSONDecodeError, TypeError):
+                    pass
         session.model_messages = list(model_messages)
         session.status = "active"
         session.pending_action = None
