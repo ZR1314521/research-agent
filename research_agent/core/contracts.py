@@ -68,6 +68,8 @@ def classify_artifact(key: str, value: str, declared: dict[str, str]) -> str:
     suffix = Path(value).suffix.lower()
     if suffix == ".docx":
         return "WordDocument"
+    if suffix in {".png", ".svg", ".jpg", ".jpeg", ".webp"}:
+        return "Image"
     if suffix in {".bib", ".ris", ".nbib"} or "reference" in key or "citation" in key:
         return "ReferenceList"
     if "paper" in key:

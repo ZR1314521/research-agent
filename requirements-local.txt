@@ -10,3 +10,4 @@ pypdf>=3.0.0
 # Data analysis (optional, for experiment-data-analysis and run-code)
 pandas>=2.0.0
 openpyxl>=3.0.0
+matplotlib>=3.9.0

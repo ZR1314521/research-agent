@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import TopNav, { BrandMark } from "./components/TopNav";
 import ApprovalDock from "./components/ApprovalDock";
+import ArtifactList from "./components/ArtifactList";
 import HomePage from "./pages/HomePage";
 import SettingsPage from "./pages/SettingsPage";
 import TaskCenterPage from "./pages/TaskCenterPage";
@@ -20,13 +21,6 @@ function statusLabel(value) {
     completed: "已完成", failed: "失败", cancelled: "已取消",
   };
   return labels[value] || value || "就绪";
-}
-
-function artifactEntries(value) {
-  return Object.entries(value || {}).map(([name, item]) => {
-    const path = typeof item === "string" ? item : item?.path || "";
-    return [name, path];
-  }).filter(([, path]) => /\.(docx|pdf)$/i.test(path));
 }
 
 function fileName(path) {
@@ -121,7 +115,7 @@ function WorkspacePage({
                   {item.content && <div className="message-content">{item.content}</div>}
                   {item.streaming && !item.content && !(item.steps || []).length && <div className="thinking-indicator"><i /><i /><i /><span>正在理解任务</span></div>}
                   {(item.calls || []).length > 0 && <details className="call-details"><summary>模型调用 {(item.calls || []).length} 次</summary>{item.calls.map(call => <div key={call.call_id || `${call.operation}-${call.attempt}`}><span>{call.operation}</span><span>第 {call.attempt} 次</span><span>{call.status}</span></div>)}</details>}
-                  {artifactEntries(item.artifacts).length > 0 && <div className="artifact-list">{artifactEntries(item.artifacts).map(([name, path]) => <span className="artifact-chip" key={name}><i>▤</i><span>{fileName(path)}</span></span>)}</div>}
+                  <ArtifactList api={API} runId={runId} artifacts={item.artifacts} />
                 </article>
                 {isUser && <span className="message-avatar user-message-avatar"><i /></span>}
               </div>
@@ -152,13 +146,13 @@ function WorkspacePage({
               value={message}
               onChange={event => setMessage(event.target.value)}
               onKeyDown={event => { if (event.ctrlKey && event.key === "Enter") { event.preventDefault(); startTurn(message, true); } }}
-              disabled={busy}
-              placeholder="描述你希望 Agent 完成的科研任务…"
+              disabled={busy && turnState !== "paused"}
+              placeholder={turnState === "paused" ? "输入调整要求，Agent 将在同一任务中继续…" : "描述你希望 Agent 完成的科研任务…"}
               rows={3}
             />
-            <button disabled={!runId || !message.trim() || busy} className="send-button"><span>发送</span><i>➤</i></button>
+            <button disabled={!runId || !message.trim() || (busy && turnState !== "paused")} className="send-button"><span>{turnState === "paused" ? "调整并继续" : "发送"}</span><i>➤</i></button>
           </form>
-          <div className="composer-meta"><span>Ctrl + Enter 发送</span>{activeTurnId && <span>Turn {activeTurnId.slice(0, 8)}</span>}</div>
+          <div className={`composer-meta ${turnState === "paused" ? "intervention-meta" : ""}`}><span>{turnState === "paused" ? "当前任务已暂停；下一条消息会调整任务并继续" : "Ctrl + Enter 发送"}</span>{activeTurnId && <span>Turn {activeTurnId.slice(0, 8)}</span>}</div>
         </section>
       </section>
     </main>
@@ -313,6 +307,7 @@ export default function App() {
         break;
       case "pause_requested": setTurnState("pause_requested"); break;
       case "turn_paused": setTurnState("paused"); break;
+      case "turn_intervened": setTurnState("running"); break;
       case "turn_resumed": setTurnState("running"); break;
       case "approval_required": setTurnState("waiting_approval"); refreshRun(runId).catch(() => {}); break;
       case "turn_finished":
@@ -377,12 +372,39 @@ export default function App() {
 
   const startTurn = useCallback(async (text, showUser = true) => {
     const value = text.trim();
-    if (!runId || !value || busy) return;
+    const isIntervention = turnState === "paused";
+    if (!runId || !value || (busy && !isIntervention)) return;
     if (apiVersion) {
       try {
         const response = await fetch(`${API}/health`); const health = await response.json();
         if (health.version && health.version !== apiVersion) { setError("后端已经重启，请刷新页面后继续。"); return; }
       } catch { setError("无法连接本地后端。"); return; }
+    }
+    if (isIntervention) {
+      setError("");
+      try {
+        const response = await fetch(`${API}/runs/${encodeURIComponent(runId)}/intervene`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: value }),
+        });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          throw new Error(body.detail || response.statusText);
+        }
+        setMessages(previous => {
+          const next = [...previous];
+          for (let index = next.length - 1; index >= 0; index -= 1) {
+            if (next[index].role === "agent" && next[index].streaming) {
+              next[index] = { ...next[index], streaming: false };
+              break;
+            }
+          }
+          return [...next, { role: "user", content: value }, { role: "agent", content: "", steps: [], calls: [], artifacts: {}, streaming: true }];
+        });
+        setMessage(""); setTurnState("running"); scrollDown();
+      } catch (eventError) {
+        setError(eventError.message); setTurnState("paused");
+      }
+      return;
     }
     const generation = generationRef.current; const controller = new AbortController();
     abortRef.current = controller; sequenceRef.current = 0; setError(""); setTurnState("running"); setPendingApproval(null);
@@ -403,7 +425,7 @@ export default function App() {
         setError(`${eventError.message}。已完成的步骤仍然保留，可刷新后继续。`); setTurnState("failed"); updateAgent(agent => ({ ...agent, streaming: false }));
       }
     } finally { if (abortRef.current === controller) abortRef.current = null; }
-  }, [apiVersion, busy, consume, runId, updateAgent]);
+  }, [apiVersion, busy, consume, runId, turnState, updateAgent]);
 
   const switchSession = id => {
     if (id === runIdRef.current) return;

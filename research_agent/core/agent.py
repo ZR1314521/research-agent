@@ -49,7 +49,7 @@ class AgentLoop:
         progress: Progress | None = None,
         cancel_event: Event | None = None,
         event_sink: Callable[[ProviderEvent], Any] | None = None,
-        pause_gate: Callable[[], bool] | None = None,
+        pause_gate: Callable[[], bool | str] | None = None,
         rate_limit_gate: Callable[[float | None], bool] | None = None,
     ) -> None:
         self.config = config
@@ -160,8 +160,17 @@ class AgentLoop:
                 return self._finish(session, message, state.last_skill, messages)
             if self.cancel_event and self.cancel_event.is_set():
                 return self._cancelled(session, state.last_skill, messages)
-            if self.pause_gate and not self.pause_gate():
-                return self._cancelled(session, state.last_skill, messages)
+            if self.pause_gate:
+                boundary = self.pause_gate()
+                if boundary is False:
+                    return self._cancelled(session, state.last_skill, messages)
+                if isinstance(boundary, str) and boundary.strip():
+                    user_message = boundary.strip()
+                    messages.append({"role": "user", "content": user_message})
+                    session.model_messages = list(messages)
+                    session.add_message("user", user_message, intervention=True)
+                    self.sessions.event(session, "intervention_applied", summary=user_message[:300])
+                    self.sessions.save(session)
 
             system = self.prompts.system(session)
             messages = self.context.fit_to_budget(

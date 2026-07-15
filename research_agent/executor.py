@@ -6,6 +6,7 @@ from threading import Event
 
 from research_agent.capabilities.arxiv_reader import ArxivReaderService
 from research_agent.capabilities.data_analysis import ExperimentAnalysisService
+from research_agent.capabilities.charting import ChartService
 from research_agent.capabilities.data_transform import DataTransformService
 from research_agent.capabilities.documents import DocumentService
 from research_agent.capabilities.files import FileService
@@ -41,6 +42,7 @@ class ToolExecutor:
         self.rag = RagService(config, session_dir, cancel_event)
         self.references = ReferenceService(config, session_dir)
         self.data = ExperimentAnalysisService(session_dir)
+        self.charts = ChartService(session_dir)
         self.data_transform = DataTransformService(session_dir)
         self.quality = QualityAuditService(session_dir)
         self.arxiv = ArxivReaderService(config, session_dir, cancel_event)
@@ -63,6 +65,7 @@ class ToolExecutor:
             "screen_papers": self._screen,
             "summarize_papers": self._summarize,
             "analyze_experiment": self._analyze,
+            "generate_chart": self._chart,
             "format_references": self._references,
             "write_review": self._review,
             "read_arxiv": lambda args, session: self.arxiv.read(args),
@@ -184,6 +187,11 @@ class ToolExecutor:
         if not arguments.get("path"):
             arguments["path"] = session.artifacts.get("latest_data", "")
         return self.data.analyze(arguments)
+
+    def _chart(self, arguments: dict[str, Any], session: ChatSession) -> dict[str, Any]:
+        if not arguments.get("path"):
+            arguments["path"] = session.artifacts.get("latest_data", "")
+        return self.charts.render(arguments)
 
     def _references(self, arguments: dict[str, Any], session: ChatSession) -> dict[str, Any]:
         if not arguments.get("path"):

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import shutil
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -10,6 +12,7 @@ from fastapi.testclient import TestClient
 from research_agent.app import create_app
 from research_agent.chat import ResearchChatAgent
 from research_agent.config import AgentConfig
+from research_agent.turns import TurnControl
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -88,6 +91,47 @@ class LocalWorkbenchApiTests(unittest.TestCase):
         self.assertTrue(any(item["event"] == "tool_observed" for item in payload["events"]))
         sequences = [item["sequence"] for item in payload["events"]]
         self.assertEqual(sequences, list(dict.fromkeys(sequences)))
+
+    def test_registered_artifact_can_be_opened_by_name(self) -> None:
+        run_id = self.client.post("/runs", json={}).json()["run_id"]
+        session = self.agent.sessions.load(run_id)
+        image = self.agent.sessions.directory(run_id) / "chart.png"
+        image.write_bytes(b"fake-png-content")
+        session.artifact_records["chart_one"] = {
+            "type": "Image", "path": str(image), "producer": "scientific-chart",
+        }
+        self.agent.sessions.save(session)
+
+        response = self.client.get(f"/runs/{run_id}/artifacts/chart_one")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"fake-png-content")
+
+    def test_intervention_endpoint_resumes_the_same_paused_turn(self) -> None:
+        run_id = self.client.post("/runs", json={}).json()["run_id"]
+        coordinator = self.client.app.state.turn_coordinator
+        control = TurnControl(run_id, self.agent.sessions.directory(run_id))
+        control.state = "running"
+        control.request_pause()
+        boundary = []
+        worker = threading.Thread(target=lambda: boundary.append(control.safe_boundary()))
+        worker.start()
+        deadline = time.time() + 1
+        while control.state != "paused" and time.time() < deadline:
+            time.sleep(0.01)
+        coordinator._active[run_id] = control
+        coordinator._turns[control.turn_id] = control
+
+        response = self.client.post(
+            f"/runs/{run_id}/intervene", json={"message": "保留原图，再生成箱线图"}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["run_id"], run_id)
+        self.assertEqual(response.json()["turn_id"], control.turn_id)
+        self.assertEqual(response.json()["status"], "running")
+        worker.join(1)
+        self.assertEqual(boundary, ["保留原图，再生成箱线图"])
 
     def test_quality_outcome_report_is_available_to_the_workbench(self) -> None:
         run_id = self.client.post("/runs", json={}).json()["run_id"]

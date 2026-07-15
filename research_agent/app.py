@@ -22,7 +22,7 @@ from research_agent.usage import UsageService
 try:
     from fastapi import FastAPI, File, HTTPException, Request, UploadFile
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import StreamingResponse
+    from fastapi.responses import FileResponse, StreamingResponse
     from pydantic import BaseModel
 except Exception:  # pragma: no cover - supports the terminal-only installation
     FastAPI = None
@@ -65,6 +65,7 @@ def create_app(agent: ResearchChatAgent | None = None) -> Any:
     app.state.platform_store = platform_store
     app.state.usage_service = usage_service
     app.state.schedule_service = schedule_service
+    app.state.turn_coordinator = coordinator
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://127.0.0.1:3000", "http://localhost:3000"],
@@ -390,12 +391,35 @@ def create_app(agent: ResearchChatAgent | None = None) -> Any:
         load_run(run_id)
         return {"run_id": run_id, "status": coordinator.resume(run_id)}
 
+    @app.post("/runs/{run_id}/intervene")
+    def intervene_run(run_id: str, request: MessageRequest):
+        load_run(run_id)
+        active = coordinator.active(run_id)
+        if not active or active.state not in {"paused", "pause_requested"}:
+            raise HTTPException(status_code=409, detail="Run is not paused")
+        return {
+            "run_id": run_id,
+            "turn_id": active.turn_id,
+            "status": coordinator.intervene(run_id, request.message),
+        }
+
     @app.get("/runs/{run_id}")
     def run_status(run_id: str):
         payload = _run_payload(load_run(run_id))
         active = coordinator.active(run_id)
         payload["active_turn"] = ({"turn_id": active.turn_id, "status": active.state} if active else None)
         return payload
+
+    @app.get("/runs/{run_id}/artifacts/{artifact_name}")
+    def run_artifact(run_id: str, artifact_name: str):
+        session = load_run(run_id)
+        record = session.artifact_records.get(artifact_name)
+        if not record:
+            raise HTTPException(status_code=404, detail="Artifact not found")
+        path = Path(str(record.get("path") or "")).expanduser().resolve()
+        if not path.exists() or not path.is_file():
+            raise HTTPException(status_code=404, detail="Artifact file not found")
+        return FileResponse(path)
 
     @app.post("/runs/{run_id}/messages")
     def submit_message(run_id: str, request: MessageRequest):

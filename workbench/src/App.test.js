@@ -299,3 +299,62 @@ test("creating a conversation does not cancel the running conversation", async (
   await act(async () => root.unmount());
   container.remove();
 });
+
+test("a paused conversation accepts an adjustment in the same turn", async () => {
+  window.history.replaceState(null, "", "#/home");
+  const pausedRun = {
+    ...run("run-p", "Paused work"),
+    status: "active",
+    active_turn: { turn_id: "turn-p", status: "paused" },
+  };
+  global.fetch = jest.fn((input, options = {}) => {
+    const url = String(input);
+    if (url.endsWith("/health")) return Promise.resolve(jsonResponse({}));
+    if (url.endsWith("/styles")) return Promise.resolve(jsonResponse([]));
+    if (url.endsWith("/settings/account")) return Promise.resolve(jsonResponse({}));
+    if (url.endsWith("/sessions")) return Promise.resolve(jsonResponse([]));
+    if (url.endsWith("/runs") && options.method === "POST") return Promise.resolve(jsonResponse(pausedRun));
+    if (url.endsWith("/runs/run-p")) return Promise.resolve(jsonResponse(pausedRun));
+    if (url.includes("/runs/run-p/turns/turn-p/events")) return Promise.resolve(streamResponse([]));
+    if (url.endsWith("/runs/run-p/intervene") && options.method === "POST") {
+      return Promise.resolve(jsonResponse({ run_id: "run-p", turn_id: "turn-p", status: "running" }));
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+
+  await act(async () => {
+    root.render(<App />);
+    await Promise.resolve();
+  });
+  await act(async () => {
+    container.querySelector(".chat-cta").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  const textarea = container.querySelector(".message-composer textarea");
+  expect(textarea.disabled).toBe(false);
+  expect(textarea.placeholder).toContain("调整要求");
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+    setter.call(textarea, "保留原图，再生成箱线图");
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    await Promise.resolve();
+  });
+  await act(async () => {
+    container.querySelector(".message-composer").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  expect(global.fetch.mock.calls.some(([input]) => String(input).endsWith("/runs/run-p/intervene"))).toBe(true);
+  expect(container.textContent).toContain("保留原图，再生成箱线图");
+
+  await act(async () => root.unmount());
+  container.remove();
+});

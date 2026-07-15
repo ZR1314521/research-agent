@@ -2,7 +2,9 @@ param([switch]$DryRun)
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Python = Join-Path $env:LOCALAPPDATA "Python\bin\python.exe"
+$ProjectPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+$FallbackPython = Join-Path $env:LOCALAPPDATA "Python\bin\python.exe"
+$Python = if (Test-Path -LiteralPath $ProjectPython) { $ProjectPython } else { $FallbackPython }
 $Workbench = Join-Path $ProjectRoot "workbench"
 $ReactScripts = Join-Path $Workbench "node_modules\.bin\react-scripts.cmd"
 $Npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
@@ -15,6 +17,7 @@ if ($DryRun) { return }
 if (-not (Test-Path -LiteralPath $Python)) { throw "Missing Python runtime: $Python. FastAPI/Uvicorn must be installed there." }
 if (-not $Npm) { throw "Missing npm command. Install Node.js before starting the React workbench." }
 if (-not (Test-Path -LiteralPath $ReactScripts)) { throw "Missing local React artifact: $ReactScripts. This no-install bootstrap will not download it; provide the workbench node_modules dependencies offline first." }
+$ExpectedVersion = (& $Python -c "from research_agent.version import RUNTIME_VERSION; print(RUNTIME_VERSION)").Trim()
 
 $ApiProcess = $null
 $WorkbenchProcess = $null
@@ -24,9 +27,16 @@ $Listener = Get-NetTCPConnection -LocalPort 8877 -State Listen -ErrorAction Sile
 if ($Listener) {
     $Compatible = $false
     try {
+        $Health = Invoke-RestMethod -Uri "$ApiBase/health" -TimeoutSec 2
         $Schema = Invoke-RestMethod -Uri "$ApiBase/openapi.json" -TimeoutSec 2
         $Paths = @($Schema.paths.PSObject.Properties.Name)
-        $Compatible = $Paths -contains "/schedules" -and $Paths -contains "/runs/{run_id}/turns/stream"
+        $Compatible = (
+            $Health.version -eq $ExpectedVersion -and
+            $Paths -contains "/schedules" -and
+            $Paths -contains "/runs/{run_id}/turns/stream" -and
+            $Paths -contains "/runs/{run_id}/intervene" -and
+            $Paths -contains "/runs/{run_id}/artifacts/{artifact_name}"
+        )
     } catch {
         $Compatible = $false
     }

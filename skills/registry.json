@@ -38,6 +38,13 @@
       "description": "Analyze CSV, TSV, XLSX, or text experiment data."
     },
     {
+      "name": "scientific-chart",
+      "kind": "tool",
+      "handler": "generate_chart",
+      "planner_visible": true,
+      "description": "Render an explicit line, scatter, bar, histogram, box, or heatmap specification from tabular data and return a PNG or SVG artifact."
+    },
+    {
       "name": "data-transform",
       "kind": "tool",
       "handler": "transform_data",

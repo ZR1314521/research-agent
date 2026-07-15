@@ -52,7 +52,7 @@ class ResearchChatAgent:
         progress: Progress | None = None,
         cancel_event: Event | None = None,
         event_sink: Callable[[Any], Any] | None = None,
-        pause_gate: Callable[[], bool] | None = None,
+        pause_gate: Callable[[], bool | str] | None = None,
         rate_limit_gate: Callable[[float | None], bool] | None = None,
     ) -> ChatResponse:
         text = text.strip()
@@ -114,7 +114,7 @@ class ResearchChatAgent:
         progress: Progress | None = None,
         cancel_event: Event | None = None,
         event_sink: Callable[[Any], Any] | None = None,
-        pause_gate: Callable[[], bool] | None = None,
+        pause_gate: Callable[[], bool | str] | None = None,
         rate_limit_gate: Callable[[float | None], bool] | None = None,
     ) -> ChatResponse:
         result = AgentLoop(

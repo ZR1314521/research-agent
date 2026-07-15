@@ -33,6 +33,7 @@ class TurnControl:
     def __post_init__(self) -> None:
         self._condition = threading.Condition()
         self._pause_requested = False
+        self._intervention: str | None = None
         self._approval: bool | None = None
         self._rate_limit_count = 0
         self._event_path = self.run_dir / f"turn_{self.turn_id}.jsonl"
@@ -64,7 +65,7 @@ class TurnControl:
             self.emit("pause_requested")
             return self.state
 
-    def safe_boundary(self) -> bool:
+    def safe_boundary(self) -> bool | str:
         """Block only between provider/tool operations; never restart completed work."""
         with self._condition:
             if not self._pause_requested:
@@ -73,15 +74,33 @@ class TurnControl:
             self.emit("turn_paused")
             while self._pause_requested and not self.cancel_event.is_set():
                 self._condition.wait(timeout=1.0)
-            return not self.cancel_event.is_set()
+            if self.cancel_event.is_set():
+                return False
+            intervention = self._intervention
+            self._intervention = None
+            return intervention or True
 
     def resume(self) -> str:
         with self._condition:
             if self.state not in {"paused", "pause_requested", "rate_limited"}:
                 return self.state
             self._pause_requested = False
+            self._intervention = None
             self.state = "running"
             self.emit("turn_resumed")
+            self._condition.notify_all()
+            return self.state
+
+    def intervene(self, message: str) -> str:
+        """Continue a paused turn with a user message at the same safe boundary."""
+        text = str(message or "").strip()
+        with self._condition:
+            if not text or self.state not in {"paused", "pause_requested"}:
+                return self.state
+            self._intervention = text
+            self._pause_requested = False
+            self.state = "running"
+            self.emit("turn_intervened", {"message": text})
             self._condition.notify_all()
             return self.state
 
@@ -133,6 +152,7 @@ class TurnControl:
                 return self.state
             self.cancel_event.set()
             self._pause_requested = False
+            self._intervention = None
             self.state = "cancelled"
             self.emit("turn_cancelled")
             self._condition.notify_all()
@@ -272,6 +292,10 @@ class TurnCoordinator:
     def resume(self, run_id: str) -> str:
         control = self.active(run_id)
         return control.resume() if control else "idle"
+
+    def intervene(self, run_id: str, message: str) -> str:
+        control = self.active(run_id)
+        return control.intervene(message) if control else "idle"
 
     def approve(self, run_id: str, approved: bool) -> str:
         control = self.active(run_id)

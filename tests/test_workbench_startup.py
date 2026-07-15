@@ -22,6 +22,14 @@ class WorkbenchStartupTests(unittest.TestCase):
         self.assertIn("-m uvicorn research_agent.app:app --host 127.0.0.1 --port 8877", result.stdout)
         self.assertIn("--prefix", result.stdout)
         self.assertIn("workbench start", result.stdout)
+        self.assertIn(str(ROOT / ".venv" / "Scripts" / "python.exe"), result.stdout)
+
+    def test_compatibility_check_reads_runtime_version_instead_of_copying_it(self) -> None:
+        script = (ROOT / "start_workbench.ps1").read_text(encoding="utf-8")
+
+        self.assertIn("from research_agent.version import RUNTIME_VERSION", script)
+        self.assertIn("$Health.version -eq $ExpectedVersion", script)
+        self.assertNotIn('$ExpectedVersion = "0.7.0"', script)
 
 
 if __name__ == "__main__":
