@@ -193,6 +193,7 @@ export default function App() {
   const sequenceRef = useRef(0);
   const turnIdRef = useRef("");
   const bottomRef = useRef(null);
+  const resolvingRef = useRef(false);
   const busy = BUSY.has(turnState);
 
   useEffect(() => {
@@ -240,15 +241,17 @@ export default function App() {
     loadSessions();
   }, [loadSessions]);
 
-  const applyRun = useCallback(run => {
+  const applyRun = useCallback((run, { replaceMessages = true } = {}) => {
     if (!run) return;
     if (run.run_id) { setRunId(run.run_id); loadSessions(); }
     setArtifacts(run.artifacts || {});
-    if (run.token_usage !== undefined) setTokenUsage(run.token_usage);
-    if (run.token_limit) setTokenLimit(run.token_limit);
-    if (run.messages?.length) {
-      setMessages(run.messages.map(item => ({ role: item.role === "assistant" ? "agent" : item.role, content: item.content, steps: [], calls: [], artifacts: {} })));
-    } else if (run.messages) setMessages([]);
+    if (run.context_size !== undefined) setTokenUsage(run.context_size);
+    if (run.window_size) setTokenLimit(run.window_size);
+    if (replaceMessages) {
+      if (run.messages?.length) {
+        setMessages(run.messages.map(item => ({ role: item.role === "assistant" ? "agent" : item.role, content: item.content, steps: [], calls: [], artifacts: {} })));
+      } else if (run.messages) setMessages([]);
+    }
     const pending = ["tool_approval", "plan_approval"].includes(run.pending_action?.type) ? run.pending_action : null;
     setPendingApproval(pending);
     setPlanActive(run.plan_mode === true);
@@ -259,12 +262,12 @@ export default function App() {
     else if (run.status) setTurnState(["active", "planning", "waiting_user"].includes(run.status) ? "idle" : run.status);
   }, [loadSessions]);
 
-  const refreshRun = useCallback(async id => {
+  const refreshRun = useCallback(async (id, opts) => {
     if (!id) return null;
     const response = await fetch(`${API}/runs/${encodeURIComponent(id)}`);
     if (!response.ok) throw new Error((await response.json()).detail || response.statusText);
     const run = await response.json();
-    applyRun(run);
+    applyRun(run, opts);
     return run;
   }, [applyRun]);
 
@@ -308,7 +311,9 @@ export default function App() {
       case "approval_required": setTurnState("waiting_approval"); refreshRun(runId).catch(() => {}); break;
       case "turn_finished":
         updateAgent(agent => ({ ...agent, content: agent.content || event.assistant_message || "", artifacts: event.artifacts || agent.artifacts || {}, streaming: false }));
-        setArtifacts(event.artifacts || {}); setPendingApproval(null); setTurnState("completed"); setActiveTurnId(""); refreshRun(runId).catch(() => {}); break;
+        setArtifacts(event.artifacts || {}); setPendingApproval(null); setTurnState("completed"); setActiveTurnId("");
+        if (event.context_size !== undefined) setTokenUsage(event.context_size);
+        refreshRun(runId, { replaceMessages: false }).catch(() => {}); break;
       case "turn_failed": updateAgent(agent => ({ ...agent, streaming: false })); setError(event.error || "任务执行失败，但已经完成的成果仍然保留。"); setTurnState("failed"); setActiveTurnId(""); break;
       case "turn_cancelled": updateAgent(agent => ({ ...agent, streaming: false })); setTurnState("cancelled"); setActiveTurnId(""); break;
       default: break;
@@ -392,23 +397,26 @@ export default function App() {
   };
 
   const resolveApproval = async approved => {
-    if (!pendingApproval || turnState !== "waiting_approval") return;
+    if (!pendingApproval || turnState !== "waiting_approval" || resolvingRef.current) return;
+    resolvingRef.current = true;
     setPendingApproval(null); setTurnState("running");
-    if (!approved) {
-      try {
+    try {
+      if (!approved) {
         const response = await fetch(`${API}/runs/${encodeURIComponent(runId)}/reject`, { method: "POST" });
         if (!response.ok) throw new Error((await response.json()).detail || response.statusText);
         const data = await response.json(); applyRun(data);
         if (data.assistant_message) setMessages(previous => [...previous, { role: "agent", content: data.assistant_message, steps: [], calls: [], artifacts: data.artifacts || {}, streaming: false }]);
-      } catch (eventError) { setError(eventError.message); setTurnState("idle"); }
-      return;
-    }
-    try {
+        return;
+      }
       const response = await fetch(`${API}/runs/${encodeURIComponent(runId)}/approve`, { method: "POST" });
       if (!response.ok) throw new Error((await response.json()).detail || response.statusText);
       const data = await response.json(); applyRun(data);
       setMessages(previous => [...previous, { role: "agent", content: data.assistant_message || "操作已完成。", steps: (data.events || []).filter(event => event.event === "tool_observed").map(event => ({ key: event.sequence, tool: event.skill || "", status: "done", summary: (event.summary || "").slice(0, 200) })), calls: [], artifacts: data.artifacts || {}, streaming: false }]);
-    } catch (eventError) { setError(eventError.message); setTurnState("idle"); }
+    } catch (eventError) {
+      setError(eventError.message); setTurnState("idle");
+    } finally {
+      resolvingRef.current = false;
+    }
   };
 
   const upload = async event => {

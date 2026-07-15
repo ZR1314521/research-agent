@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import time
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -57,9 +58,9 @@ class LiteratureService:
         year_from = self._int(arguments.get("year_from"))
         year_to = self._int(arguments.get("year_to"))
         venues = [str(item).strip() for item in arguments.get("venues") or [] if str(item).strip()]
-        sources = [str(item) for item in arguments.get("sources") or ["openalex", "semantic_scholar", "arxiv"]]
+        sources = [str(item) for item in arguments.get("sources") or ["openalex"]]
         limit = max(1, min(50, self._int(arguments.get("limit")) or 12))
-        max_rounds = max(1, min(3, self._int(arguments.get("rounds")) or 3))
+        max_rounds = max(1, min(3, self._int(arguments.get("rounds")) or 1))
         max_requests_per_source = max(1, min(10, self._int(arguments.get("max_requests_per_source")) or 2))
         must_include = [str(item) for item in arguments.get("must_include") or [] if str(item).strip()]
         exclude = [str(item) for item in arguments.get("exclude") or [] if str(item).strip()]
@@ -104,6 +105,7 @@ class LiteratureService:
                     )
                     round_results.extend(papers)
                     source_requests.append({"source": source, "status": "ok", "count": len(papers), "attempt": source_attempts[source]})
+                    time.sleep(0.3)  # polite pause between API calls
                 except Exception as exc:
                     error = str(exc)
                     errors.append({"source": source, "error": error})
@@ -430,7 +432,6 @@ class LiteratureService:
         if errors:
             lines.append("部分数据源失败，但已保留其他来源结果。")
         lines.append(f"文献池：{paths.get('requested_output') or paths['paper_pool_markdown']}")
-        lines.append("你看这批是否合适？下一句可直接问“这些论文都大概讲什么”。")
         return "\n".join(lines)
 
     def _client(self, source: str):

@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "tool": "search_literature",
+  "message": "Found 1 paper",
+  "data": {
+    "results": [
+      {
+        "title": "Paper A",
+        "year": 2024
+      }
+    ]
+  },
+  "artifacts": {}
+}

@@ -275,6 +275,24 @@
       "description": "Version control with git. Run init, add, commit, log, diff, status, checkout, branch in the working directory."
     },
     {
+      "name": "office-to-md",
+      "kind": "tool",
+      "handler": "office_to_md",
+      "planner_visible": true,
+      "description": "Convert PDF, DOCX, PPTX, XLSX, HTML, images, audio to Markdown using markitdown. Provide the file path to convert.",
+      "write_access": true,
+      "direct_delivery": true
+    },
+    {
+      "name": "md-to-office",
+      "kind": "tool",
+      "handler": "md_to_office",
+      "planner_visible": true,
+      "description": "Convert Markdown to DOCX, PPTX, PDF, HTML, EPUB, LaTeX using Pandoc. Provide path or text, and target_format.",
+      "write_access": true,
+      "direct_delivery": true
+    },
+    {
       "name": "shell",
       "kind": "tool",
       "handler": "shell",

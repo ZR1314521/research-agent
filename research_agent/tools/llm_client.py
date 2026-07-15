@@ -3,6 +3,7 @@ from __future__ import annotations
 import http.client
 import json
 import threading
+import time as _time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -142,18 +143,25 @@ class OpenAICompatibleProvider:
         )
         with self.semaphore:
             with urllib.request.urlopen(request, timeout=timeout) as response:
+                raw = response.read()
+                text = raw.decode("utf-8", errors="replace")
+                # Cloudflare / reverse-proxy challenge pages are HTML, not
+                # JSON.  Surface a clear error rather than letting the model
+                # echo raw markup.
+                if text.lstrip().startswith("<!") or text.lstrip().startswith("<html"):
+                    raise ValueError("Provider returned HTML (likely a challenge page or proxy block)")
                 if on_event is None:
-                    return json.loads(response.read().decode("utf-8"))
-                return self._read_stream(response, on_event)
+                    return json.loads(text)
+                return self._read_stream_lines(text.splitlines(True), on_event)
 
     @staticmethod
-    def _read_stream(response: Any, on_event: EventSink) -> dict[str, Any]:
+    def _read_stream_lines(lines: list[str], on_event: EventSink) -> dict[str, Any]:
         content: list[str] = []
         reasoning: list[str] = []
         calls: dict[int, dict[str, Any]] = {}
         finish_reason = ""
         usage: dict[str, Any] = {}
-        for raw in response:
+        for raw in lines:
             line = raw.decode("utf-8", errors="replace").strip() if isinstance(raw, bytes) else str(raw).strip()
             if not line or line.startswith(":") or not line.startswith("data:"):
                 continue
@@ -245,6 +253,8 @@ class ModelGateway:
         attempts = 1 + max(0, self.config.llm_retry)
         last_error = ""
         for attempt in range(1, attempts + 1):
+            if attempt > 1:
+                _time.sleep(1.0)  # polite back-off between retries
             call = self.ledger.begin(self.config.llm_provider, self.config.llm_model, operation, attempt)
             if sink:
                 sink(ProviderEvent("provider_call_started", {

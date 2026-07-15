@@ -76,6 +76,12 @@ class AgentLoop:
             return AgentResult("当前没有等待确认的操作。", waiting=False)
 
         messages = [dict(item) for item in pending.get("model_messages", session.model_messages)]
+        # Purge orphan tool_calls left by a cancelled turn before the
+        # sanitisation fix — otherwise the provider returns HTTP 400.
+        if messages and messages[-1].get("role") == "assistant" and messages[-1].get("tool_calls"):
+            messages[-1].pop("tool_calls", None)
+            if not messages[-1].get("content"):
+                messages[-1]["content"] = "（操作已取消）"
         user_message = str(pending.get("user_message") or "")
         state = LoopState(
             last_skill=str(pending.get("last_skill") or ""),
@@ -151,6 +157,17 @@ class AgentLoop:
                 return self._cancelled(session, state.last_skill, messages)
             if self.pause_gate and not self.pause_gate():
                 return self._cancelled(session, state.last_skill, messages)
+
+            messages = self.context.fit_to_budget(
+                messages,
+                summarizer=lambda older: self._summarize_older(older),
+            )
+
+            # Polite pause between turns so providers don't interpret
+            # rapid successive calls as abuse.  The delay grows slightly
+            # with turn count to naturally discourage runaway loops.
+            import time as _time
+            _time.sleep(min(2.0, turn * 0.15))
 
             with call_context(
                 operation="agent_turn", parent_call_id=state.last_call_id,
@@ -368,6 +385,7 @@ class AgentLoop:
             details.append(f"- {name}" + (f": {visible}" if visible else ""))
         message = "需要你的确认后才能执行：\n" + "\n".join(details) + "\n\n请选择 Accept 或 Reject。"
         session.status = "waiting_user"
+        session.metadata["last_approval_message"] = message
         session.pending_action = {
             "type": "tool_approval",
             "skill": ", ".join(names),
@@ -394,6 +412,7 @@ class AgentLoop:
         state: LoopState,
     ) -> AgentResult:
         session.status = "waiting_user"
+        session.metadata["last_approval_message"] = message
         session.pending_action = {
             "type": "plan_approval",
             "model_messages": messages,
@@ -418,10 +437,54 @@ class AgentLoop:
                 for item in session.messages
                 if item.get("role") in {"user", "assistant"}
             ]
+        # Purge orphan tool_calls: walk back to find the most recent
+        # assistant with tool_calls, keep only calls with a matching
+        # tool result already appended.
+        seen: set[str] = set()
+        for msg in reversed(messages):
+            if msg.get("role") == "tool":
+                seen.add(str(msg.get("tool_call_id") or ""))
+            elif msg.get("role") == "assistant" and msg.get("tool_calls"):
+                surviving = [tc for tc in msg["tool_calls"] if str(tc.get("id") or "") in seen]
+                if surviving:
+                    msg["tool_calls"] = surviving
+                else:
+                    msg.pop("tool_calls", None)
+                    if not msg.get("content"):
+                        msg["content"] = "（操作已取消）"
+                break
         if not messages or messages[-1].get("role") != "user" or messages[-1].get("content") != user_message:
             messages.append({"role": "user", "content": user_message})
         session.model_messages = list(messages)
         return messages
+
+    def _summarize_older(self, messages: list[dict[str, Any]]) -> str:
+        """Summarize older conversation turns into a compact paragraph.
+
+        Uses a minimal, non-streaming LLM call.  On failure, degrades to
+        a structural summary so the harness never blocks.
+        """
+        transcript = json.dumps(messages, ensure_ascii=False, default=str)
+        try:
+            result = self.client.complete(
+                "context_summary",
+                f"Summarize these earlier conversation turns in Chinese. "
+                f"Keep: user goals, tool names called, key findings, and decisions made. "
+                f"Discard: raw data, error traces, redundant details.\n\n{transcript}",
+                fallback="",
+                system="Reply with only the summary paragraph. No preamble.",
+                temperature=0,
+            )
+            if result.used_remote_model and result.text.strip():
+                return result.text.strip()
+        except Exception:
+            pass
+        roles = [m.get("role", "?") for m in messages]
+        tools = list(dict.fromkeys(
+            (json.loads(m.get("content", "{}")).get("tool", "") if isinstance(m.get("content"), str) else "")
+            for m in messages if m.get("role") == "tool"
+        ))
+        return f"Earlier: {len(messages)} messages ({roles.count('user')} user turns, tools: {', '.join(t for t in tools if t) or 'none'})."
 
     @staticmethod
     def _arguments(raw: Any) -> tuple[dict[str, Any], str]:
@@ -464,6 +527,28 @@ class AgentLoop:
     def _cancelled(self, session: ChatSession, skill: str, model_messages: list[dict[str, Any]]) -> AgentResult:
         message = "已取消当前步骤；已完成成果和会话状态已保存，源文件没有被删除或覆盖。"
         session.model_messages = list(model_messages)
+        # An assistant message with pending tool_calls must be followed
+        # by a matching tool result for every call before the next user
+        # turn, otherwise the provider rejects the request (HTTP 400).
+        # Walk backwards to find the most recent assistant message that
+        # owns tool_calls, then strip only orphan calls (those without
+        # a tool result already appended).
+        seen_results: set[str] = set()
+        for msg in reversed(session.model_messages):
+            if msg.get("role") == "tool":
+                seen_results.add(str(msg.get("tool_call_id") or ""))
+            elif msg.get("role") == "assistant" and msg.get("tool_calls"):
+                surviving = []
+                for tc in msg["tool_calls"]:
+                    if str(tc.get("id") or "") in seen_results:
+                        surviving.append(tc)
+                if surviving:
+                    msg["tool_calls"] = surviving
+                else:
+                    msg.pop("tool_calls", None)
+                    if not msg.get("content"):
+                        msg["content"] = "（操作已取消）"
+                break  # only sanitize the most recent assistant with tool_calls
         session.status = "waiting_user"
         session.pending_action = {"type": "cancelled", "tool": skill}
         session.add_message("assistant", message, skill=skill, cancelled=True)

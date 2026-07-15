@@ -50,6 +50,8 @@ DECLARED_CONTRACTS: dict[str, dict[str, Any]] = {
     "web_fetch": {"input_schema": _schema({"url": "string", "output_dir": "string", "timeout": "integer"}, required=("url",)), "produces": ("OpenAccessPDF", "ResearchText")},
     "git": {"input_schema": _schema({"command": "string", "cwd": "string"}, required=("command",)), "produces": ("File",)},
     "shell": {"input_schema": _schema({"command": "string"}, required=("command",)), "produces": ("File",)},
+    "office_to_md": {"input_schema": _schema({"path": "string", "output_path": "string"}, required=("path",)), "produces": ("ResearchText",), "artifact_types": {"markdown_output": "ResearchText"}},
+    "md_to_office": {"input_schema": _schema({"path": "string", "text": "string", "target_format": "string", "template": "string", "output_path": "string"}), "produces": ("WordDocument", "ResearchText"), "artifact_types": {"office_docx": "WordDocument", "office_pptx": "File", "office_pdf": "File"}},
 }
 OUTPUT_SCHEMA = {"required": ["message", "artifacts", "data"]}
 

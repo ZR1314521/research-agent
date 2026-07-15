@@ -223,12 +223,24 @@ class TurnCoordinator:
                 if control.state != "cancelled":
                     control.cancel()
                 return
+            context_size = 0
+            provider_log = control.run_dir / "provider_calls.jsonl"
+            if provider_log.exists():
+                for line in provider_log.read_text(encoding="utf-8", errors="ignore").splitlines():
+                    if not line.strip(): continue
+                    try:
+                        call = json.loads(line)
+                        prompt = call.get("usage", {}).get("prompt_tokens", 0)
+                        if prompt:
+                            context_size = prompt
+                    except Exception: pass
             payload = {
                 "assistant_message": response.message,
                 "skill": response.skill,
                 "status": response.session.status,
                 "artifacts": response.session.artifact_records,
                 "pending_action": response.session.pending_action,
+                "context_size": context_size,
             }
             self.agent.sessions.event(
                 response.session, "assistant_message", response.skill, response.message[:300]

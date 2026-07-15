@@ -21,6 +21,7 @@ from research_agent.capabilities.code_runner import CodeRunnerService
 from research_agent.capabilities.web_fetch import WebFetchService
 from research_agent.capabilities.git_ops import GitService
 from research_agent.capabilities.shell import ShellService
+from research_agent.capabilities.office_and_md import OfficeAndMdService
 from research_agent.config import AgentConfig
 from research_agent.core.contracts import ContractError, has_required_artifacts, validate_arguments, validate_result_quality
 from research_agent.platform_store import DEFAULT_PRIVACY, platform_setting
@@ -50,6 +51,7 @@ class ToolExecutor:
         self.web_fetch = WebFetchService()
         self.git = GitService()
         self.shell = ShellService()
+        self.office_md = OfficeAndMdService(session_dir)
         self.confirmation_policies: dict[str, Callable[[dict[str, Any]], bool]] = {
             "workspace_files": self.workspace.requires_confirmation,
         }
@@ -85,6 +87,8 @@ class ToolExecutor:
             "web_fetch": lambda args, session: self.web_fetch.fetch(args),
             "git": lambda args, session: self.git.run(args),
             "shell": lambda args, session: self.shell.run(args),
+            "office_to_md": lambda args, session: self.office_md.to_markdown(args, session.artifacts),
+            "md_to_office": lambda args, session: self.office_md.to_office(args, session.artifacts),
         }
 
     def requires_confirmation(self, skill_name: str, arguments: dict[str, Any]) -> bool:

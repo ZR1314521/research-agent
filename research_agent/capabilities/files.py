@@ -17,7 +17,7 @@ CATEGORY_BY_EXT = {
     ".bib": ("references", "reference-format-gbt7714"),
     ".ris": ("references", "reference-format-gbt7714"),
     ".nbib": ("references", "reference-format-gbt7714"),
-    ".pdf": ("paper", "literature-matrix-extraction"),
+    ".pdf": ("paper", "office-to-md"),
     ".docx": ("document", "agent-decision"),
     ".csl": ("rules", "gbt7714-strict-rules"),
 }

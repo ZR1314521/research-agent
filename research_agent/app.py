@@ -101,7 +101,7 @@ def create_app(agent: ResearchChatAgent | None = None) -> Any:
         session.artifacts.update({key: str(value) for key, value in result["artifacts"].items()})
         register_artifacts(session, agent.registry.get("file-upload-router"), result["artifacts"])
         agent.sessions.event(session, "tool_observed", "file-upload-router", result["message"], ok=True)
-        session.add_message("user", f"[notification] uploaded file: {result.get('message', '')}")
+        session.metadata["last_upload"] = result.get("message", "")
         agent.sessions.save(session)
         return {**result, **_run_payload(session)}
 
@@ -359,6 +359,9 @@ def create_app(agent: ResearchChatAgent | None = None) -> Any:
         session = load_run(run_id)
         if 0 <= index < len(session.messages):
             session.messages.pop(index)
+            # Rebuild model_messages from the trimmed messages so the
+            # deleted content does not persist in the LLM context.
+            session.model_messages.clear()
             agent.sessions.save(session)
             return {"trimmed": True, "index": index}
         return {"trimmed": False, "detail": "index out of range"}
@@ -454,10 +457,13 @@ def create_app(agent: ResearchChatAgent | None = None) -> Any:
         active = coordinator.active(run_id)
         if active and active.state == "waiting_approval":
             coordinator.approve(run_id, True)
-            active.wait_for_result_boundary()
+            boundary = active.wait_for_result_boundary()
             current = load_run(run_id)
             final = active.final_payload or {}
-            return {**_run_payload(current), "assistant_message": final.get("assistant_message", ""), "skill": final.get("skill", ""), "turn_id": active.turn_id, "turn_status": active.state}
+            # When the turn hit another approval boundary (nested),
+            # final_payload is still empty — use the session state instead.
+            assistant = final.get("assistant_message") or current.metadata.get("last_approval_message", "")
+            return {**_run_payload(current), "assistant_message": assistant, "skill": final.get("skill", ""), "turn_id": active.turn_id, "turn_status": boundary}
         response = agent.resolve_pending(load_run(run_id), True)
         return {**_run_payload(response.session), "assistant_message": response.message, "skill": response.skill}
 
@@ -466,10 +472,11 @@ def create_app(agent: ResearchChatAgent | None = None) -> Any:
         active = coordinator.active(run_id)
         if active and active.state == "waiting_approval":
             coordinator.approve(run_id, False)
-            active.wait_for_result_boundary()
+            boundary = active.wait_for_result_boundary()
             current = load_run(run_id)
             final = active.final_payload or {}
-            return {**_run_payload(current), "assistant_message": final.get("assistant_message", ""), "skill": final.get("skill", ""), "turn_id": active.turn_id, "turn_status": active.state}
+            assistant = final.get("assistant_message") or current.metadata.get("last_approval_message", "")
+            return {**_run_payload(current), "assistant_message": assistant, "skill": final.get("skill", ""), "turn_id": active.turn_id, "turn_status": boundary}
         response = agent.resolve_pending(load_run(run_id), False)
         return {**_run_payload(response.session), "assistant_message": response.message, "skill": response.skill}
 
@@ -587,12 +594,19 @@ def _run_payload(session: Any) -> dict[str, Any]:
     start = max(1, len(session.events) - 49)
     events = [{"sequence": sequence, **item} for sequence, item in enumerate(session.events[-50:], start=start)]
     token_usage = 0
+    context_size = 0
     log = Path(__file__).resolve().parents[1] / "runs" / "sessions" / session.session_id / "provider_calls.jsonl"
     if log.exists():
         for line in log.read_text(encoding="utf-8", errors="ignore").splitlines():
             if not line.strip(): continue
-            try: token_usage += json.loads(line).get("usage", {}).get("total_tokens", 0)
+            try:
+                call = json.loads(line)
+                token_usage += call.get("usage", {}).get("total_tokens", 0)
+                prompt = call.get("usage", {}).get("prompt_tokens", 0)
+                if prompt:
+                    context_size = prompt
             except Exception: pass
+    window = max(1, int(_load_dotenv(Path(__file__).resolve().parents[1] / ".env").get("RESEARCH_AGENT_CONTEXT_WINDOW", "")) or 0)
     return {
         "run_id": session.session_id,
         "session_id": session.session_id,
@@ -604,8 +618,9 @@ def _run_payload(session: Any) -> dict[str, Any]:
         "pending_action": session.pending_action,
         "plan_mode": session.metadata.get("plan_mode", False),
         "token_usage": token_usage,
-        "token_limit": max(1, int(_load_dotenv(Path(__file__).resolve().parents[1] / ".env").get("RESEARCH_AGENT_CONTEXT_WINDOW", "")) or 1000000),
-        "messages": [{"role": m.get("role"), "content": m.get("content", "")[:500]} for m in session.messages[-30:]],
+        "context_size": context_size,
+        "window_size": window or 1000000,
+        "messages": [{"role": m.get("role"), "content": m.get("content", "")} for m in session.messages[-30:]],
         "outcome_report": session.metadata.get("outcome_report", ""),
     }
 
