@@ -90,17 +90,23 @@ class DocumentService:
 
     def readable_text(self, path: str) -> str:
         source = Path(path).expanduser().resolve()
-        if not source.is_file() or source.suffix.lower() not in {".docx", ".md", ".markdown"}:
-            raise ValueError("document-summary requires an existing DOCX or Markdown file")
-        if source.suffix.lower() in {".md", ".markdown"}:
+        if not source.is_file():
+            raise ValueError("document-summary requires an existing file")
+        suffix = source.suffix.lower()
+        if suffix in {".md", ".markdown"}:
             return source.read_text(encoding="utf-8", errors="ignore").strip()
-        try:
-            from docx import Document
-            return "\n".join(paragraph.text for paragraph in Document(source).paragraphs).strip()
-        except Exception:
-            with ZipFile(source) as archive:
-                xml = archive.read("word/document.xml").decode("utf-8", errors="ignore")
-            return "\n".join(re.findall(r"<w:t[^>]*>(.*?)</w:t>", xml)).strip()
+        if suffix == ".pdf":
+            from markitdown import MarkItDown
+            return MarkItDown().convert(str(source)).text_content.strip()
+        if suffix == ".docx":
+            try:
+                from docx import Document
+                return "\n".join(paragraph.text for paragraph in Document(source).paragraphs).strip()
+            except Exception:
+                with ZipFile(source) as archive:
+                    xml = archive.read("word/document.xml").decode("utf-8", errors="ignore")
+                return "\n".join(re.findall(r"<w:t[^>]*>(.*?)</w:t>", xml)).strip()
+        raise ValueError(f"document-summary does not support {suffix} files")
 
     def _pandoc(self) -> Path:
         import os

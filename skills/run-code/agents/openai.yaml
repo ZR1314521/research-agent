@@ -1,3 +1,2 @@
-display_name: Run Code
-short_description: Execute Python code for data analysis, statistics, plotting, and computation.
-default_prompt: Write and execute Python code for the requested analysis task.
+model: gpt-5.6-sol
+reasoning_effort: medium

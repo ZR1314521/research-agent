@@ -13,7 +13,7 @@
       "kind": "tool",
       "handler": "search_literature",
       "planner_visible": true,
-      "description": "Search multiple scholarly sources, normalize results, screen them, and create a paper pool. Omit optional result limits unless the user explicitly requested a count; the service applies its configured default.",
+      "description": "Search scholarly sources selected explicitly in the sources array, normalize results, screen them, and create a paper pool. Available source values are openalex, semantic_scholar, crossref, pubmed, and arxiv. The model chooses the sources for the current task; the service has no hidden default or fallback order.",
       "batch_policy": "single",
       "network_access": true
     },
@@ -140,6 +140,7 @@
       "handler": "search_openalex",
       "planner_visible": true,
       "description": "Search OpenAlex only.",
+      "batch_policy": "single",
       "network_access": true
     },
     {
@@ -148,6 +149,7 @@
       "handler": "search_pubmed",
       "planner_visible": true,
       "description": "Search PubMed only.",
+      "batch_policy": "single",
       "network_access": true
     },
     {
@@ -156,6 +158,25 @@
       "handler": "search_semantic_scholar",
       "planner_visible": true,
       "description": "Search Semantic Scholar only.",
+      "batch_policy": "single",
+      "network_access": true
+    },
+    {
+      "name": "literature-search-crossref",
+      "kind": "source",
+      "handler": "search_crossref",
+      "planner_visible": true,
+      "description": "Search Crossref publication metadata only. Useful for broad DOI and bibliographic coverage; abstracts may be sparse.",
+      "batch_policy": "single",
+      "network_access": true
+    },
+    {
+      "name": "literature-search-arxiv",
+      "kind": "source",
+      "handler": "search_arxiv",
+      "planner_visible": true,
+      "description": "Search arXiv preprints only. Useful for recent technical work; results are not necessarily peer reviewed.",
+      "batch_policy": "single",
       "network_access": true
     },
     {
@@ -259,12 +280,14 @@
       "write_access": true
     },
     {
-      "name": "web-search",
+      "name": "opencli-search",
       "kind": "tool",
       "handler": "web_search",
       "planner_visible": true,
-      "description": "Search the public web via opencli for journal guidelines, conference details, formatting rules, software docs, and any non-academic reference material. Returns titles, URLs, and snippets.",
-      "network_access": true
+      "description": "Search any website through an OpenCLI adapter. Consult the opencli-usage and smart-search skills to discover available adapters and select the best one for each query.",
+      "batch_policy": "single",
+      "network_access": true,
+      "aliases": ["web-search", "web-search-http"]
     },
     {
       "name": "run-code",

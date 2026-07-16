@@ -9,10 +9,17 @@ jest.mock("react-markdown", () => {
 });
 jest.mock("remark-gfm", () => () => {});
 
-import App from "./App";
+import App, { outcomeStepStatus } from "./App";
 
 global.IS_REACT_ACT_ENVIRONMENT = true;
 global.TextDecoder = NodeTextDecoder;
+
+test("tool outcomes map to distinct user-visible step states", () => {
+  expect(outcomeStepStatus("success", true)).toBe("completed");
+  expect(outcomeStepStatus("empty", false)).toBe("empty");
+  expect(outcomeStepStatus("partial", true)).toBe("partial");
+  expect(outcomeStepStatus("rate_limited", false)).toBe("rate_limited");
+});
 
 function jsonResponse(value) {
   return { ok: true, json: async () => value };

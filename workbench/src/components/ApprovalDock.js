@@ -1,3 +1,5 @@
+import Icon from "./Icon";
+
 export default function ApprovalDock({ pending, onResolve }) {
   if (!pending) return null;
   const summary = pending.summary || pending.message || "确认后 Agent 才会继续执行。";
@@ -5,7 +7,7 @@ export default function ApprovalDock({ pending, onResolve }) {
 
   return (
     <section className="approval-dock" role="alert" aria-live="assertive">
-      <span className="approval-icon">!</span>
+      <span className="approval-icon"><Icon name="warning" size={22} /></span>
       <div>
         <small>等待你的决定 · {operation}</small>
         <strong>这一步需要授权</strong>

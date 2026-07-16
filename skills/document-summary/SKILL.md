@@ -1,3 +1,5 @@
-# Document summary
+# document-summary
 
-Read a DOCX or Markdown file and return a Chinese summary covering problem, method, evidence, and limitations. Saves document_summary.md. Summarizes the main body only — reference sections are intentionally excluded. For reference extraction or formatting, use reference-format-gbt7714 directly.
+Explain an explicitly supplied DOCX or Markdown document in Chinese, save a grounded summary artifact, and return the summary directly.
+
+Handler: document_summary

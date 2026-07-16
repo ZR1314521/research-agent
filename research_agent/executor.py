@@ -17,7 +17,7 @@ from research_agent.capabilities.references import ReferenceService
 from research_agent.capabilities.writing import WritingService
 from research_agent.capabilities.workspace import WorkspaceService
 from research_agent.capabilities.papers import PaperAcquisitionService
-from research_agent.capabilities.web_search import WebSearchService
+from research_agent.capabilities.web_search import HttpWebSearchService, WebSearchService
 from research_agent.capabilities.code_runner import CodeRunnerService
 from research_agent.capabilities.web_fetch import WebFetchService
 from research_agent.capabilities.git_ops import GitService
@@ -49,6 +49,7 @@ class ToolExecutor:
         self.workspace = WorkspaceService(config.root_dir, session_dir)
         self.papers = PaperAcquisitionService(session_dir)
         self.web_search = WebSearchService()
+        self.http_web_search = HttpWebSearchService()
         self.code_runner = CodeRunnerService()
         self.web_fetch = WebFetchService()
         self.git = GitService()
@@ -62,6 +63,8 @@ class ToolExecutor:
             "search_openalex": lambda args, session: self._source_search("openalex", args),
             "search_pubmed": lambda args, session: self._source_search("pubmed", args),
             "search_semantic_scholar": lambda args, session: self._source_search("semantic_scholar", args),
+            "search_crossref": lambda args, session: self._source_search("crossref", args),
+            "search_arxiv": lambda args, session: self._source_search("arxiv", args),
             "screen_papers": self._screen,
             "summarize_papers": self._summarize,
             "analyze_experiment": self._analyze,
@@ -86,6 +89,7 @@ class ToolExecutor:
             "acquire_open_access_papers": self._acquire_papers,
             "create_reading_copy": lambda args, session: self.papers.reading_docx(args, session.artifacts),
             "web_search": lambda args, session: self.web_search.search(args),
+            "web_search_http": lambda args, session: self.http_web_search.search(args),
             "run_code": lambda args, session: self.code_runner.run(args),
             "web_fetch": lambda args, session: self.web_fetch.fetch(args),
             "git": lambda args, session: self.git.run(args),
@@ -137,6 +141,10 @@ class ToolExecutor:
             raise TypeError(f"Invalid handler result from {skill_name}")
         result.setdefault("artifacts", {})
         result.setdefault("data", {})
+        outcome = str(result.get("outcome") or "success")
+        if outcome not in {"success", "empty", "partial", "rate_limited", "failed", "cancelled"}:
+            raise ContractError("invalid_tool_outcome", f"工具 {skill_name} 返回了未知状态: {outcome}")
+        result["outcome"] = outcome
         if spec.output_schema and (
             not isinstance(result.get("message"), str)
             or not isinstance(result.get("artifacts"), dict)

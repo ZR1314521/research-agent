@@ -1,8 +1,5 @@
----
-name: shell
-description: Run a shell command and return its output. Use for file operations, system tasks, or any CLI tool.
----
+# shell
 
-# Shell
+Run a shell command and return stdout, stderr, and exit code. Use for system tasks, file operations, or any CLI tool.
 
-Execute a shell command and return stdout/stderr and exit code. 60s timeout. Output truncated to 3000 chars.
+Handler: shell

@@ -1,3 +1,5 @@
-# Open-access paper download
+# open-access-paper-download
 
-Download papers from the active paper pool. Requires active_papers artifact (produced by academic-search-multisource followed by literature-screening). Downloads only HTTPS open-access PDF URLs. Preserves DOI, source URL, hash, byte count, and outcome in a manifest.
+Download only verified open-access PDF URLs from the active paper pool and preserve a provenance manifest.
+
+Handler: acquire_open_access_papers

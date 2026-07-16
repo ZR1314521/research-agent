@@ -1,3 +1,2 @@
-display_name: Shell
-short_description: Run a shell command.
-default_prompt: Execute the given shell command.
+model: gpt-5.6-sol
+reasoning_effort: medium

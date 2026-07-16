@@ -1,4 +1,2 @@
-interface:
-  display_name: "Semantic Scholar"
-  short_description: "Search Semantic Scholar papers, citations, and related work."
-  default_prompt: "Use $semanticscholar-skill for this research task."
+model: gpt-5.6-sol
+reasoning_effort: medium

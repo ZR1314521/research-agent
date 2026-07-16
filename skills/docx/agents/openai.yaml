@@ -1,4 +1,2 @@
-interface:
-  display_name: "DOCX Output"
-  short_description: "Create local Word documents from research markdown artifacts."
-  default_prompt: "Use $docx for this research task."
+model: gpt-5.6-sol
+reasoning_effort: medium

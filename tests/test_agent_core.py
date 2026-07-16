@@ -16,6 +16,7 @@ from research_agent.core.prompt_runtime import PromptRuntime
 from research_agent.chat import ResearchChatAgent
 from research_agent.capabilities.files import FileService
 from research_agent.capabilities.literature import LiteratureService
+from research_agent.capabilities.web_search import HttpWebSearchService, WebSearchService
 from research_agent.capabilities.references import ReferenceService
 from research_agent.capabilities.rag import RagService
 from research_agent.capabilities.writing import WritingService
@@ -145,6 +146,46 @@ class AgentCoreTests(unittest.TestCase):
             ContextManager.estimate_tokens(result["model_data"]["papers"]),
             int(self.config.context_observation_budget * 0.72),
         )
+
+    def test_multisource_search_requires_the_model_to_select_sources(self) -> None:
+        service = LiteratureService(self.config, self.sessions.directory(self.session.session_id))
+
+        with self.assertRaisesRegex(ValueError, "明确选择"):
+            service.search({"query": "EEG motor imagery"})
+
+    def test_literature_rate_limit_is_not_reported_as_completed(self) -> None:
+        service = LiteratureService(self.config, self.sessions.directory(self.session.session_id))
+        client = Mock()
+        client.search.side_effect = RuntimeError("HTTP Error 429: Too Many Requests")
+        service._client = lambda _source: client
+        service.screen_with_edge = Mock(return_value=([], [], []))
+
+        result = service.search({"query": "EEG motor imagery", "sources": ["openalex"]})
+
+        self.assertEqual(result["outcome"], "rate_limited")
+        self.assertNotIn("完成", result["progress"]["summary"])
+        self.assertIn("限流", result["progress"]["summary"])
+
+    def test_literature_partial_result_preserves_source_errors(self) -> None:
+        service = LiteratureService(self.config, self.sessions.directory(self.session.session_id))
+        good = Mock()
+        good.search.return_value = [{"title": "Useful paper", "year": 2025, "abstract": "evidence", "source": "openalex"}]
+        limited = Mock()
+        limited.search.side_effect = RuntimeError("429 rate limit")
+        service._client = lambda source: good if source == "openalex" else limited
+        service.screen_with_edge = Mock(side_effect=lambda papers, *_args: (papers, [], []))
+
+        result = service.search({"query": "EEG motor imagery", "sources": ["openalex", "semantic_scholar"]})
+
+        self.assertEqual(result["outcome"], "partial")
+        self.assertEqual(result["data"]["count"], 1)
+        self.assertTrue(result["data"]["errors"])
+
+    def test_web_search_routes_require_an_explicit_model_choice(self) -> None:
+        with self.assertRaisesRegex(ValueError, "adapter"):
+            WebSearchService().search({"query": "YOLO trends"})
+        with self.assertRaisesRegex(ValueError, "provider"):
+            HttpWebSearchService().search({"query": "YOLO trends"})
 
     def test_literature_batch_bounds_screening_and_interleaves_queries(self) -> None:
         service = LiteratureService(self.config, self.sessions.directory(self.session.session_id))

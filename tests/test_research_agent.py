@@ -10,7 +10,6 @@ from unittest.mock import patch
 from research_agent.capabilities.rag import RagService
 from research_agent.chat import ResearchChatAgent
 from research_agent.config import AgentConfig
-from research_agent.planner import RulePlanner
 from research_agent.logging import ModelCallLogger
 from research_agent.session import ChatSession
 from research_agent.skill_registry import SkillRegistry
@@ -107,18 +106,6 @@ class ResearchChatAgentTests(unittest.TestCase):
             content = (ROOT / "skills" / skill.name / "SKILL.md").read_text(encoding="utf-8")
             self.assertNotIn("TODO", content)
 
-    def test_rule_planner_understands_three_year_search(self) -> None:
-        plan = RulePlanner().plan("找近3年的CNN BCI EEG论文", ChatSession.create())
-        self.assertEqual(plan.action.skill, "academic-search-multisource")
-        self.assertEqual(plan.action.arguments["query"], "CNN BCI EEG")
-        self.assertEqual(plan.action.arguments["year_to"] - plan.action.arguments["year_from"], 2)
-
-    def test_rule_planner_keeps_writing_and_search_separate(self) -> None:
-        writing = RulePlanner().plan("帮我写论文引言", ChatSession.create())
-        self.assertEqual(writing.action.skill, "20-ml-paper-writing")
-        search = RulePlanner().plan('找5篇CNN EEG论文并保存到 "D:\\results\\papers.docx"', ChatSession.create())
-        self.assertEqual(search.action.skill, "academic-search-multisource")
-        self.assertEqual(search.action.arguments["output_path"], "D:\\results\\papers.docx")
 
     def test_model_incomplete_read_uses_fallback(self) -> None:
         config = AgentConfig.load(ROOT)

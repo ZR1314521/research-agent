@@ -16,7 +16,7 @@ class LiteratureSearchNode(BaseNode):
 
     def __init__(self, config, run_dir: Path, sources: list[str] | None = None, limit: int = 20):
         super().__init__(config, run_dir)
-        self.sources = sources or ["openalex", "semantic_scholar", "arxiv"]
+        self.sources = list(dict.fromkeys(sources or []))
         self.limit = limit
 
     def run(self, state: RunState) -> RunState:
@@ -50,9 +50,12 @@ class LiteratureSearchNode(BaseNode):
                     if item.get("category") in {"papers", "references", "structured"} and item.get("extension") == ".json":
                         try:
                             data = json.loads(Path(item["stored_path"]).read_text(encoding="utf-8-sig"))
-                            all_papers.extend(data.get("papers", data if isinstance(data, list) else []))
+                            candidates = data if isinstance(data, list) else data.get("papers", []) if isinstance(data, dict) else []
+                            all_papers.extend(item for item in candidates if isinstance(item, dict))
                         except Exception as exc:
                             errors.append({"source": item.get("filename"), "error": str(exc)})
+        if not self.sources and not all_papers:
+            raise ValueError("旧工作流未收到明确的文献来源，也没有可用的上传文献")
         papers_path = self.run_dir / "papers_raw.json"
         papers_path.write_text(json.dumps(all_papers, ensure_ascii=False, indent=2), encoding="utf-8")
         if errors:

@@ -1,4 +1,2 @@
-interface:
-  display_name: "Document Coauthoring"
-  short_description: "Revise research documents through focused user feedback."
-  default_prompt: "Use $doc-coauthoring to revise this research document."
+model: gpt-5.6-sol
+reasoning_effort: medium

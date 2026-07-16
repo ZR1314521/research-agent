@@ -688,8 +688,8 @@ def _workflow_projection(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "started_at": event.get("timestamp", ""),
             })
             continue
-        if event_type in {"cancelled", "failed"}:
-            terminal_status = "cancelled" if event_type == "cancelled" else "failed"
+        if event_type in {"cancel_requested", "cancelled", "failed"}:
+            terminal_status = "cancelled" if event_type in {"cancel_requested", "cancelled"} else "failed"
             for item in steps:
                 if item["status"] in {"queued", "running"}:
                     item["status"] = terminal_status
@@ -698,7 +698,7 @@ def _workflow_projection(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if event_type not in {"tool_started", "tool_observed"}:
             continue
         step = next(
-            (item for item in reversed(steps) if item["skill"] == skill and item["status"] != "completed"),
+            (item for item in reversed(steps) if item["skill"] == skill and item["status"] in {"queued", "running"}),
             None,
         )
         if step is None:
@@ -710,7 +710,17 @@ def _workflow_projection(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if event_type == "tool_started":
             step["status"] = "running"
         else:
-            step["status"] = "completed" if event.get("ok", True) else "failed"
+            outcome = str(event.get("outcome") or "")
+            projected = {
+                "success": "completed",
+                "partial": "partial",
+                "empty": "empty",
+                "rate_limited": "rate_limited",
+                "failed": "failed",
+                "cancelled": "cancelled",
+            }.get(outcome)
+            step["status"] = projected or ("completed" if event.get("ok", True) else "failed")
+            step["outcome"] = outcome or ("success" if event.get("ok", True) else "failed")
             step["summary"] = str(event.get("summary") or "")
             step["finished_at"] = event.get("timestamp", "")
     return steps[-50:]

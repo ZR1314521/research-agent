@@ -14,6 +14,7 @@ from research_agent.context import ContextManager
 from research_agent.logging import ModelCallLogger
 from research_agent.tools.llm_client import LLMClient
 from research_agent.tools.arxiv import ArxivClient
+from research_agent.tools.crossref import CrossrefClient
 from research_agent.tools.openalex import OpenAlexClient
 from research_agent.tools.pubmed import PubMedClient
 from research_agent.tools.semantic_scholar import SemanticScholarClient
@@ -57,7 +58,7 @@ class LiteratureService:
         year_from = self._int(arguments.get("year_from"))
         year_to = self._int(arguments.get("year_to"))
         venues = [str(item).strip() for item in arguments.get("venues") or [] if str(item).strip()]
-        sources = [str(item) for item in arguments.get("sources") or ["openalex"]]
+        sources = self._selected_sources(arguments)
         limit = max(1, min(self.config.literature_max_limit, self._int(arguments.get("limit")) or self.config.literature_default_limit))
         max_rounds = max(1, min(self.config.literature_max_rounds, self._int(arguments.get("rounds")) or 1))
         max_requests_per_source = max(1, min(
@@ -151,17 +152,19 @@ class LiteratureService:
         candidates = pool[:self.config.literature_screening_limit]
         screened, excluded, edge = self.screen_with_edge(candidates, query, year_from, year_to, venues, must_include, exclude, precise)
         screened = screened[:limit]
+        outcome = self._search_outcome(screened, errors, [request for item in rounds for request in item["source_requests"]])
         paths = self._write_outputs(query, screened, excluded, edge, rounds, errors)
         requested = str(arguments.get("output_path") or "").strip()
         if requested:
             paths["requested_output"] = str(self._save_requested(requested, query, screened))
         return {
-            "message": self._search_message(screened, errors, paths),
+            "message": self._search_message(screened, errors, paths, outcome),
             "artifacts": paths,
             "data": {"count": len(screened), "papers": screened, "rounds": rounds, "errors": errors},
-            "model_data": self._answer_evidence(query, screened, errors),
+            "model_data": {**self._answer_evidence(query, screened, errors), "outcome": outcome},
+            "outcome": outcome,
             "progress": {
-                "summary": f"文献检索与筛选完成：纳入 {len(screened)} 篇",
+                "summary": self._progress_summary(outcome, retrieved=len(pool), included=len(screened), errors=errors),
                 "metrics": {"retrieved": len(pool), "evaluated": len(candidates), "included": len(screened), "excluded": len(excluded), "edge": len(edge)},
             },
         }
@@ -170,7 +173,7 @@ class LiteratureService:
         year_from = self._int(arguments.get("year_from"))
         year_to = self._int(arguments.get("year_to"))
         venues = [str(item).strip() for item in arguments.get("venues") or [] if str(item).strip()]
-        sources = list(dict.fromkeys(str(item).strip() for item in arguments.get("sources") or ["openalex"] if str(item).strip()))
+        sources = self._selected_sources(arguments)
         limit = max(1, min(self.config.literature_max_limit, self._int(arguments.get("limit")) or self.config.literature_default_limit))
         must_include = [str(item) for item in arguments.get("must_include") or [] if str(item).strip()]
         exclude = [str(item) for item in arguments.get("exclude") or [] if str(item).strip()]
@@ -233,17 +236,19 @@ class LiteratureService:
             "source_requests": requests,
             "stop_reason": "batch_complete",
         }]
+        outcome = self._search_outcome(screened, errors, requests)
         paths = self._write_outputs(research_question, screened, excluded, edge, rounds, errors)
         requested = str(arguments.get("output_path") or "").strip()
         if requested:
             paths["requested_output"] = str(self._save_requested(requested, research_question, screened))
         return {
-            "message": self._search_message(screened, errors, paths),
+            "message": self._search_message(screened, errors, paths, outcome),
             "artifacts": paths,
             "data": {"count": len(screened), "papers": screened, "rounds": rounds, "errors": errors},
-            "model_data": self._answer_evidence(research_question, screened, errors),
+            "model_data": {**self._answer_evidence(research_question, screened, errors), "outcome": outcome},
+            "outcome": outcome,
             "progress": {
-                "summary": f"批量检索完成：获取 {len(results)} 篇，去重后 {len(deduplicated)} 篇，纳入 {len(screened)} 篇",
+                "summary": self._progress_summary(outcome, retrieved=len(results), included=len(screened), errors=errors),
                 "metrics": {"retrieved": len(results), "deduplicated": len(deduplicated), "evaluated": len(screening_candidates), "included": len(screened), "excluded": len(excluded), "edge": len(edge)},
             },
         }
@@ -655,10 +660,21 @@ class LiteratureService:
             path.write_text(self._markdown(query, papers), encoding="utf-8")
         return path
 
-    def _search_message(self, papers: list[dict[str, Any]], errors: list[dict[str, str]], paths: dict[str, str]) -> str:
+    def _search_message(
+        self,
+        papers: list[dict[str, Any]],
+        errors: list[dict[str, str]],
+        paths: dict[str, str],
+        outcome: str,
+    ) -> str:
         if not papers:
             detail = "；".join(f"{item['source']}: {item['error']}" for item in errors[:3])
-            return "没有检索到符合条件的论文。" + (f" 数据源错误：{detail}" if detail else " 请放宽关键词或期刊范围。")
+            lead = {
+                "rate_limited": "文献来源当前限流，尚未获得可用论文。",
+                "failed": "本次文献检索未成功，尚未获得可用论文。",
+                "empty": "已查询所选来源，但没有发现符合条件的论文。",
+            }.get(outcome, "没有检索到符合条件的论文。")
+            return lead + (f" 来源反馈：{detail}" if detail else " 可以调整关键词、年份或来源后再试。")
         lines = [f"找到并筛选出 {len(papers)} 篇论文："]
         for index, paper in enumerate(papers[:8], 1):
             lines.append(f"{index}. {paper.get('title')} ({paper.get('year') or '?'}, {paper.get('venue') or 'venue unknown'})")
@@ -669,12 +685,62 @@ class LiteratureService:
         lines.append(f"文献池：{paths.get('requested_output') or paths['paper_pool_markdown']}")
         return "\n".join(lines)
 
+    @staticmethod
+    def _is_rate_limit(error: str) -> bool:
+        value = str(error or "").lower()
+        return "429" in value or "too many" in value or "rate limit" in value or "rate_limited" in value
+
+    def _search_outcome(
+        self,
+        papers: list[dict[str, Any]],
+        errors: list[dict[str, str]],
+        requests: list[dict[str, Any]],
+    ) -> str:
+        if papers:
+            return "partial" if errors else "success"
+        successful_requests = any(item.get("status") == "ok" for item in requests)
+        if not errors or successful_requests:
+            return "empty"
+        if errors and all(self._is_rate_limit(str(item.get("error") or "")) for item in errors):
+            return "rate_limited"
+        return "failed"
+
+    @staticmethod
+    def _progress_summary(
+        outcome: str,
+        *,
+        retrieved: int,
+        included: int,
+        errors: list[dict[str, str]],
+    ) -> str:
+        if outcome == "success":
+            return f"找到 {retrieved} 篇候选文献，筛选后纳入 {included} 篇"
+        if outcome == "partial":
+            return f"部分来源可用：纳入 {included} 篇，另有 {len(errors)} 个来源请求失败"
+        if outcome == "empty":
+            return "所选来源已返回，但没有发现符合条件的论文"
+        if outcome == "rate_limited":
+            return "所选文献来源当前限流，未获得可用结果"
+        return "所选文献来源请求失败，未获得可用结果"
+
+    @staticmethod
+    def _selected_sources(arguments: dict[str, Any]) -> list[str]:
+        sources = list(dict.fromkeys(
+            str(item).strip().lower()
+            for item in arguments.get("sources") or []
+            if str(item).strip()
+        ))
+        if not sources:
+            raise ValueError("多源文献检索需要模型明确选择至少一个 sources 来源")
+        return sources
+
     def _client(self, source: str):
         return {
             "openalex": OpenAlexClient(self.config),
             "pubmed": PubMedClient(self.config),
             "semantic_scholar": SemanticScholarClient(self.config),
             "arxiv": ArxivClient(),
+            "crossref": CrossrefClient(self.config),
         }.get(source)
 
     def _int(self, value: Any) -> int | None:

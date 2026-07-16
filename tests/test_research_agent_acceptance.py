@@ -10,7 +10,6 @@ from research_agent.capabilities.literature import LiteratureService
 from research_agent.capabilities.files import FileService
 from research_agent.chat import ResearchChatAgent
 from research_agent.config import AgentConfig
-from research_agent.planner import RulePlanner
 from research_agent.session import ChatSession
 from research_agent.tools.llm_client import LLMResult
 
@@ -104,14 +103,6 @@ class AcceptanceTests(unittest.TestCase):
             self.assertIsNotNone(waiting.session.pending_action)
             return self.agent.resolve_pending(waiting.session, True)
 
-    def test_novice_inputs_get_defaults_or_one_question(self) -> None:
-        planner = RulePlanner()
-        latest = planner.plan("找点最新的，别太老", ChatSession.create())
-        self.assertIsNone(latest.action)
-        self.assertIn("研究主题", latest.reply)
-        best = planner.plan("给我找最好的几篇论文", ChatSession.create())
-        self.assertIsNone(best.action)
-        self.assertIn("最好", best.reply)
 
     def test_unconfigured_model_does_not_fake_conversation_with_keywords(self) -> None:
         object.__setattr__(self.config, "llm_api_key", "")
@@ -121,19 +112,6 @@ class AcceptanceTests(unittest.TestCase):
         self.assertIn("模型尚未配置", pinyin.message)
         self.assertNotIn("科研步骤", pinyin.message)
 
-    def test_compound_literature_request_starts_with_search_and_keeps_constraints(self) -> None:
-        plan = RulePlanner().plan(
-            "找近三年 CNN EEG MDD 论文，排除综述，只用 OpenAlex 和 PubMed，先给十篇；我确认后做矩阵、综述、GB/T 和 IEEE Word。",
-            ChatSession.create(),
-        )
-        self.assertEqual(plan.action.skill, "academic-search-multisource")
-        args = plan.action.arguments
-        self.assertEqual(args["sources"], ["openalex", "pubmed"])
-        self.assertEqual(args["limit"], 10)
-        self.assertIn("CNN", args["must_include"])
-        self.assertIn("EEG", args["must_include"])
-        self.assertIn("MDD", args["must_include"])
-        self.assertIn("review", [item.lower() for item in args["exclude"]])
 
     def test_precise_screening_keeps_edge_papers_out_of_active_pool(self) -> None:
         session = self.agent.new_session()

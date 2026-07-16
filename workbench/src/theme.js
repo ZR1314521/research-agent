@@ -1,4 +1,4 @@
-export const THEME_VERSION = 1;
+export const THEME_VERSION = 2;
 export const THEME_STORAGE_KEY = "research-agent-theme";
 export const THEME_CHANGE_EVENT = "research-agent-theme-change";
 
@@ -22,6 +22,11 @@ export const FONT_OPTIONS = {
   ],
 };
 
+export const THEME_TYPES = [
+  { value: "standard", label: "标准界面", note: "保留当前圆润、纸张感的操作界面" },
+  { value: "pixel", label: "像素实验室", note: "方块控件、硬边阴影和像素网格；继续使用你的配色" },
+];
+
 const FONT_STACKS = {
   editorial: 'Georgia, "Times New Roman", "Noto Serif SC", serif',
   classic: '"Noto Serif SC", "Songti SC", SimSun, serif',
@@ -33,6 +38,7 @@ const FONT_STACKS = {
 export const DEFAULT_THEME = {
   version: THEME_VERSION,
   name: "燕麦奶油",
+  type: "standard",
   colors: {
     page: "#f3eee4", surface: "#fffdf8", surfaceElevated: "#ffffff", soft: "#e8eadf",
     accent: "#778255", accentStrong: "#59613f", text: "#292a25", muted: "#77766e",
@@ -83,6 +89,11 @@ export function normalizeTheme(input, { strict = false } = {}) {
   const source = input && typeof input === "object" ? input : {};
   const next = clone(DEFAULT_THEME);
   next.name = typeof source.name === "string" && source.name.trim() ? source.name.trim().slice(0, 60) : DEFAULT_THEME.name;
+  if (source.type !== undefined) {
+    const supported = THEME_TYPES.some(item => item.value === source.type);
+    if (!supported && strict) throw new Error("type不是支持的界面类型");
+    if (supported) next.type = source.type;
+  }
   for (const [key, label] of COLOR_FIELDS) {
     const value = source.colors?.[key];
     if (value === undefined) continue;
@@ -135,6 +146,7 @@ export function normalizeTheme(input, { strict = false } = {}) {
 
 export function applyTheme(input, root = document.documentElement) {
   const theme = normalizeTheme(input);
+  const pixelFont = '"Cascadia Mono", "JetBrains Mono", "Microsoft YaHei UI", Consolas, monospace';
   const variables = {
     "--theme-page": theme.colors.page,
     "--theme-surface": theme.colors.surface,
@@ -148,8 +160,8 @@ export function applyTheme(input, root = document.documentElement) {
     "--theme-success": theme.colors.success,
     "--theme-warning": theme.colors.warning,
     "--theme-danger": theme.colors.danger,
-    "--theme-font-display": FONT_STACKS[theme.typography.display],
-    "--theme-font-body": FONT_STACKS[theme.typography.body],
+    "--theme-font-display": theme.type === "pixel" ? pixelFont : FONT_STACKS[theme.typography.display],
+    "--theme-font-body": theme.type === "pixel" ? pixelFont : FONT_STACKS[theme.typography.body],
     "--theme-font-mono": '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
     "--theme-type-scale": String(theme.typography.scale),
     "--theme-control-radius": `${theme.shape.controlRadius}px`,
@@ -160,6 +172,7 @@ export function applyTheme(input, root = document.documentElement) {
   };
   Object.entries(variables).forEach(([name, value]) => root.style.setProperty(name, value));
   root.dataset.background = theme.effects.background;
+  root.dataset.themeType = theme.type;
   root.dataset.shadow = theme.effects.shadow;
   root.dataset.density = theme.layout.density;
   root.dataset.navAutoHide = String(theme.navigation.autoHide);

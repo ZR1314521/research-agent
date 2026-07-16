@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 
-CATEGORY_BY_EXT = {
+CATEGORY_HINTS_BY_EXT = {
     ".csv": ("data", "experiment-data-analysis"),
     ".tsv": ("data", "experiment-data-analysis"),
     ".xlsx": ("data", "experiment-data-analysis"),
@@ -47,7 +47,7 @@ class FileService:
             if not source.exists() or not source.is_file():
                 records.append({"source": str(source), "status": "missing"})
                 continue
-            category, next_skill = CATEGORY_BY_EXT.get(source.suffix.lower(), ("unknown", "manual-review"))
+            category, suggested_capability = CATEGORY_HINTS_BY_EXT.get(source.suffix.lower(), ("unknown", "manual-review"))
             target = upload_dir / source.name
             if target.exists() and self._sha256(target) != self._sha256(source):
                 target = upload_dir / f"{source.stem}-{self._sha256(source)[:8]}{source.suffix}"
@@ -59,7 +59,7 @@ class FileService:
                 "filename": target.name,
                 "extension": target.suffix.lower(),
                 "category": category,
-                "next_skill": next_skill,
+                "suggested_capability": suggested_capability,
                 "size_bytes": target.stat().st_size,
                 "sha256": self._sha256(target),
                 "status": "registered",
@@ -72,7 +72,7 @@ class FileService:
         artifacts["upload_manifest"] = str(manifest)
         registered = [item for item in records if item.get("status") == "registered"]
         lines = [f"已导入 {len(registered)} 个文件："]
-        lines.extend(f"- {item['filename']} -> {item['next_skill']}" for item in registered)
+        lines.extend(f"- {item['filename']}（可考虑：{item['suggested_capability']}；不会自动执行）" for item in registered)
         missing = len(records) - len(registered)
         if missing:
             lines.append(f"另有 {missing} 个路径不存在。")

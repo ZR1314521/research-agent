@@ -1,0 +1,4 @@
+interface:
+  display_name: "Canvas Design"
+  short_description: "Specify research diagrams and supporting visual assets."
+  default_prompt: "Use $canvas-design for this research task."

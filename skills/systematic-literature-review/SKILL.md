@@ -1,9 +1,5 @@
----
-name: systematic-literature-review
-description: Synthesize an approved paper pool into themes, comparisons, research gaps, an outline, and a grounded review draft. Use only after search results are available or uploaded.
----
+# systematic-literature-review
 
-# Systematic Literature Review
+Generate a grounded review outline or draft from the active paper pool.
 
-Group papers by evidence-backed themes rather than listing them one by one. Separate documented findings from inference. Cite source identifiers. Ask for confirmation when the selected pool or review scope is ambiguous.
-
+Handler: write_review

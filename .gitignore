@@ -8,3 +8,5 @@ runs/platform.sqlite3*
 .test_runs/
 .test_runtime/
 .test_tmp/
+runs/run_store.sqlite3
+runs/run_store.sqlite3-wal

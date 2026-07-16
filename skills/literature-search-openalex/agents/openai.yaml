@@ -1,4 +1,2 @@
-interface:
-  display_name: "OpenAlex Literature Search"
-  short_description: "Search OpenAlex and normalize public scholarly metadata."
-  default_prompt: "Use $literature-search-openalex for this research task."
+model: gpt-5.6-sol
+reasoning_effort: medium

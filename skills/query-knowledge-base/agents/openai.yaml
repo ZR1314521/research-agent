@@ -1,0 +1,4 @@
+interface:
+  display_name: "RAG Vector Knowledge Base"
+  short_description: "Build and query local sparse vector research knowledge."
+  default_prompt: "Use $rag-vector-knowledge-base for this research task."

@@ -1,9 +1,5 @@
----
-name: docx
-description: Create a local Word document from research Markdown or generated artifacts. Use when the user asks to save summaries, reviews, or reports as DOCX.
----
+# docx
 
-# DOCX Output
+Export a Markdown file to a Word document (.docx). Not for reading or converting DOCX files.
 
-Use the project's independent `python-docx` handler when available. Preserve headings, paragraphs, lists, and tables. Keep source Markdown beside the DOCX and never overwrite an existing document without an explicit path.
-
+Handler: export_docx

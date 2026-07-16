@@ -1,12 +1,13 @@
 import AdaptiveLogo from "../components/AdaptiveLogo";
+import Icon from "../components/Icon";
 
 const CAPABILITIES = [
-  { icon: "⌕", title: "文献检索与筛选", text: "连接公开学术来源，递归检索、去重并筛选相关研究。" },
-  { icon: "▤", title: "文献阅读与综述", text: "提取核心证据，整理文献矩阵并生成综述框架。" },
-  { icon: "⌁", title: "实验数据分析", text: "检查数据质量、异常值与趋势，形成清晰分析结果。" },
-  { icon: "▥", title: "科研图表生成", text: "根据数据和研究目标生成适合论文表达的图表。" },
-  { icon: "§", title: "参考文献管理", text: "校对文献信息，并在多种引用格式之间转换。" },
-  { icon: "✎", title: "文档写作与编辑", text: "阅读、修改和导出科研文档，保留证据与结构。" },
+  { icon: "search",   title: "文献检索与筛选", text: "连接公开学术来源，递归检索、去重并筛选相关研究。" },
+  { icon: "document", title: "文献阅读与综述", text: "提取核心证据，整理文献矩阵并生成综述框架。" },
+  { icon: "activity", title: "实验数据分析", text: "检查数据质量、异常值与趋势，形成清晰分析结果。" },
+  { icon: "chart",    title: "科研图表生成", text: "根据数据和研究目标生成适合论文表达的图表。" },
+  { icon: "section",  title: "参考文献管理", text: "校对文献信息，并在多种引用格式之间转换。" },
+  { icon: "edit",     title: "文档写作与编辑", text: "阅读、修改和导出科研文档，保留证据与结构。" },
 ];
 
 function TiltCard({ item, index }) {
@@ -25,7 +26,7 @@ function TiltCard({ item, index }) {
     event.currentTarget.style.setProperty("--tilt-x", "0deg");
     event.currentTarget.style.setProperty("--tilt-y", "0deg");
   };
-  return <article className={`capability-card tone-${index % 3}`} onPointerMove={move} onPointerLeave={reset} onBlur={reset} tabIndex="0"><span className="capability-glow" /><span className="capability-icon">{item.icon}</span><div><h3>{item.title}</h3><p>{item.text}</p></div><span className="capability-arrow">↗</span></article>;
+  return <article className={`capability-card tone-${index % 3}`} onPointerMove={move} onPointerLeave={reset} onBlur={reset} tabIndex="0"><span className="capability-glow" /><span className="capability-icon"><Icon name={item.icon} size={22} /></span><div><h3>{item.title}</h3><p>{item.text}</p></div><span className="capability-arrow"><Icon name="externalLink" size={14} /></span></article>;
 }
 
 export default function HomePage({ onStart }) {
@@ -42,7 +43,7 @@ export default function HomePage({ onStart }) {
             Research Agent 可以检索与阅读文献、分析实验数据、生成科研图表、
             整理参考文献并完成文档写作，让复杂工作集中在一个对话中完成。
           </p>
-          <div className="hero-actions"><a className="join-cta" href="https://maas.ai-yuanjing.com/" target="_blank" rel="noreferrer"><span>Join Us</span><span aria-hidden="true">↗</span></a><button className="chat-cta" onClick={onStart}><span>Chat</span><span aria-hidden="true">→</span></button></div>
+          <div className="hero-actions"><a className="join-cta" href="https://maas.ai-yuanjing.com/" target="_blank" rel="noreferrer"><span>Join Us</span><Icon name="externalLink" size={14} /></a><button className="chat-cta" onClick={onStart}><span>Chat</span><Icon name="arrowRight" size={16} /></button></div>
         </div>
         <div className="hero-visual" aria-hidden="true">
           <span className="editorial-signature"><b>Research</b><b>Agent</b><i /></span>
@@ -58,8 +59,8 @@ export default function HomePage({ onStart }) {
           </div>
           <div className="paper-card paper-note"><b>研究报告</b><i /><i /><i /></div>
           <div className="paper-card paper-network"><span>●</span><span>●</span><span>●</span></div>
-          <span className="leaf-sprig sprig-left">⌇⌇</span>
-          <span className="leaf-sprig sprig-right">⌇⌇</span>
+          <span className="leaf-sprig sprig-left" />
+          <span className="leaf-sprig sprig-right" />
         </div>
       </section>
 

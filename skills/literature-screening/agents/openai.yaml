@@ -1,4 +1,2 @@
-interface:
-  display_name: "Literature Screening"
-  short_description: "Deduplicate, score, include, and exclude academic papers."
-  default_prompt: "Use $literature-screening for this research task."
+model: gpt-5.6-sol
+reasoning_effort: medium

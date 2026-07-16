@@ -16,7 +16,7 @@ class ContractError(ValueError):
         self.details = details or {}
 
     def as_observation(self, tool: str) -> dict[str, Any]:
-        return {"ok": False, "tool": tool, "error": str(self), "error_code": self.code, "details": self.details}
+        return {"ok": False, "outcome": "failed", "tool": tool, "error": str(self), "error_code": self.code, "details": self.details}
 
 
 @dataclass(frozen=True)

@@ -1,4 +1,0 @@
-{"timestamp": "2026-07-16T13:11:32", "event": "tool_requested", "skill": "literature-matrix-extraction", "summary": "", "arguments": {"request": "???????????"}, "turn": 1}
-{"timestamp": "2026-07-16T13:11:32", "event": "tool_started", "skill": "literature-matrix-extraction", "summary": "tool execution started", "turn": 1}
-{"timestamp": "2026-07-16T13:11:32", "event": "tool_observed", "skill": "literature-matrix-extraction", "summary": "工具需要的成果物不存在: PaperPool", "ok": false, "error_code": "missing_artifact", "turn": 1}
-{"timestamp": "2026-07-16T13:11:32", "event": "finished", "skill": "literature-matrix-extraction", "summary": "????????"}

@@ -4,19 +4,21 @@ import {
   DEFAULT_THEME,
   FONT_OPTIONS,
   THEME_PRESETS,
+  THEME_TYPES,
   applyTheme,
   loadTheme,
   parseThemeImport,
   saveTheme,
 } from "../theme";
+import Icon from "../components/Icon";
 
 const SECTIONS = [
-  ["quick", "⚙", "快速设置"],
-  ["usage", "⌁", "用量统计"],
-  ["sources", "▤", "学术数据源"],
-  ["theme", "◌", "色彩设计"],
-  ["privacy", "◇", "权限与隐私"],
-  ["account", "▣", "账号信息"],
+  ["quick", "settings", "快速设置"],
+  ["usage", "activity", "用量统计"],
+  ["sources", "document", "学术数据源"],
+  ["theme", "palette", "色彩设计"],
+  ["privacy", "shield", "权限与隐私"],
+  ["account", "checkSquare", "账号信息"],
 ];
 
 const PROVIDER_LINKS = {
@@ -107,11 +109,11 @@ function QuickSetup({ api }) {
   return <>
     <SectionHeading title="快速设置" text="连接你的模型服务，即可开始使用" />
     <section className="quick-setup-card">
-      <div className="form-row provider-row"><label htmlFor="provider">模型服务提供商</label><div className="field-stack"><select id="provider" value={provider} onChange={event => chooseProvider(event.target.value)}><option value="">选择服务商</option>{presets.map(item => <option value={item.name} key={item.name}>{item.name}</option>)}<option value="自定义">自定义 OpenAI 兼容服务</option></select>{links && <div className="provider-links"><a href={links.site} target="_blank" rel="noreferrer">官方网站 ↗</a><a href={links.key} target="_blank" rel="noreferrer">申请 API Key ↗</a><a href={links.docs} target="_blank" rel="noreferrer">官方文档 ↗</a></div>}</div></div>
+      <div className="form-row provider-row"><label htmlFor="provider">模型服务提供商</label><div className="field-stack"><select id="provider" value={provider} onChange={event => chooseProvider(event.target.value)}><option value="">选择服务商</option>{presets.map(item => <option value={item.name} key={item.name}>{item.name}</option>)}<option value="自定义">自定义 OpenAI 兼容服务</option></select>{links && <div className="provider-links"><a href={links.site} target="_blank" rel="noreferrer">官方网站 <Icon name="externalLink" size={12} /></a><a href={links.key} target="_blank" rel="noreferrer">申请 API Key <Icon name="externalLink" size={12} /></a><a href={links.docs} target="_blank" rel="noreferrer">官方文档 <Icon name="externalLink" size={12} /></a></div>}</div></div>
       <div className="form-row"><label htmlFor="api-key">API Key</label><div className="password-field"><input id="api-key" type={showKey ? "text" : "password"} value={apiKey} onChange={event => setApiKey(event.target.value)} placeholder="输入后仅保存到本机配置" /><button onClick={() => setShowKey(value => !value)} type="button">{showKey ? "隐藏" : "显示"}</button></div></div>
       <div className="form-row"><label htmlFor="base-url">Base URL</label><input id="base-url" value={baseUrl} onChange={event => setBaseUrl(event.target.value)} placeholder="https://api.example.com/v1" /></div>
       <div className="form-row"><label htmlFor="model-name">模型名称</label><input id="model-name" value={model} onChange={event => setModel(event.target.value)} placeholder="输入模型标识" /></div>
-      <button className="advanced-toggle" onClick={() => setAdvanced(value => !value)}><span>高级选项</span><span>{advanced ? "⌃" : "⌄"}</span></button>
+      <button className="advanced-toggle" onClick={() => setAdvanced(value => !value)}><span>高级选项</span><Icon name={advanced ? "chevronUp" : "chevronDown"} size={16} /></button>
       {advanced && <div className="advanced-grid"><label>上下文长度<input type="number" min="0" value={context} onChange={event => setContext(event.target.value)} /></label><label>请求超时（秒）<input type="number" min="5" value={timeout} onChange={event => setTimeoutValue(event.target.value)} /></label><label>最大并发数<input type="number" min="1" max="10" value={concurrency} onChange={event => setConcurrency(event.target.value)} /></label></div>}
       <footer className="setup-actions"><span className={`connection-status ${status.kind}`}><i />{status.text || "填写配置后可以检查连接"}</span><div><button className="secondary-action" onClick={testConnection}>测试连接</button><button className="primary-action" onClick={save}>保存并应用</button></div></footer>
     </section>
@@ -119,7 +121,7 @@ function QuickSetup({ api }) {
 }
 
 function UsageTrend({ items }) {
-  if (!items.length) return <div className="chart-empty"><span>⌁</span><p>完成任务后，这里会显示真实趋势</p></div>;
+  if (!items.length) return <div className="chart-empty"><Icon name="activity" size={28} /><p>完成任务后，这里会显示真实趋势</p></div>;
   const width = 920, height = 260, pad = 26;
   const values = items.map(item => Number(item.input || 0) + Number(item.output || 0));
   const max = Math.max(...values, 1);
@@ -150,7 +152,7 @@ function UsagePanel({ api }) {
     {error && <div className="settings-alert error">{error}</div>}
     <div className="usage-filter-row"><select value={filters.provider} onChange={event => setFilters(value => ({ ...value, provider: event.target.value }))}><option value="">全部来源</option>{(data?.filters?.providers || []).map(value => <option key={value}>{value}</option>)}</select><select value={filters.model} onChange={event => setFilters(value => ({ ...value, model: event.target.value }))}><option value="">全部模型</option>{(data?.filters?.models || []).map(value => <option key={value}>{value}</option>)}</select><select value={filters.status} onChange={event => setFilters(value => ({ ...value, status: event.target.value }))}><option value="">全部状态</option>{(data?.filters?.statuses || []).map(value => <option key={value}>{value}</option>)}</select></div>
     <section className="usage-overview">
-      <div className="usage-primary"><span className="metric-symbol">↯</span><div><small>真实消耗 Tokens</small><strong>{formatNumber(summary.total_tokens)}</strong><span>{formatNumber(summary.requests)} 次请求</span></div></div>
+      <div className="usage-primary"><span className="metric-symbol"><Icon name="zap" size={28} /></span><div><small>真实消耗 Tokens</small><strong>{formatNumber(summary.total_tokens)}</strong><span>{formatNumber(summary.requests)} 次请求</span></div></div>
       <div className="usage-cost">
         <small>总费用</small>
         <strong>{summary.cost === null || summary.cost === undefined ? "费用暂未估算" : `$${summary.cost}`}</strong>
@@ -181,9 +183,9 @@ function DataSourcesPanel({ api }) {
   const check = async source => { setStatus({ kind: "checking", text: `正在检测 ${source.name}…` }); try { const value = await apiJson(`${api}/data-sources/${source.id}/check`, { method: "POST" }); await load(); setStatus({ kind: value.status === "available" ? "success" : "error", text: value.status_message }); } catch (error) { setStatus({ kind: "error", text: error.message }); } };
   const remove = async id => { try { await mutate(`${api}/data-sources/${id}/delete`); setDeleteId(""); setStatus({ kind: "success", text: "数据源和本机凭据已删除" }); } catch (error) { setStatus({ kind: "error", text: error.message }); } };
   return <>
-    <SectionHeading title="学术数据源" text="管理 Agent 可以访问的公开来源和本机付费来源" actions={<button className="primary-action compact-action" onClick={() => setFormOpen(value => !value)}>＋ 新增数据源</button>} />
+    <SectionHeading title="学术数据源" text="管理 Agent 可以访问的公开来源和本机付费来源" actions={<button className="primary-action compact-action" onClick={() => setFormOpen(value => !value)}><Icon name="plus" className="btn-icon" />新增数据源</button>} />
     {status.text && <div className={`settings-alert ${status.kind}`}>{status.text}</div>}
-    {formOpen && <form className="source-form" onSubmit={save}><header><div><h2>新增数据源</h2><p>免费来源用于限定域名检索；付费凭据只在本机加密保存</p></div><button type="button" onClick={() => setFormOpen(false)}>×</button></header><div className="source-kind-switch"><button type="button" className={form.kind === "free" ? "active" : ""} onClick={() => setForm(value => ({ ...value, kind: "free" }))}>免费来源</button><button type="button" className={form.kind === "paid" ? "active" : ""} onClick={() => setForm(value => ({ ...value, kind: "paid" }))}>付费来源</button></div><label>数据源名称<input required value={form.name} onChange={event => setForm(value => ({ ...value, name: event.target.value }))} placeholder="例如：实验室论文库" /></label><label>网站或接口地址<input required type="url" value={form.base_url} onChange={event => setForm(value => ({ ...value, base_url: event.target.value }))} placeholder="https://example.org" /></label>{form.kind === "paid" && <div className="paid-fields"><label>账号<input required value={form.username} onChange={event => setForm(value => ({ ...value, username: event.target.value }))} autoComplete="off" /></label><label>密码<input required type="password" value={form.password} onChange={event => setForm(value => ({ ...value, password: event.target.value }))} autoComplete="new-password" /></label></div>}<footer><span>{form.kind === "paid" ? "使用当前 Windows 用户加密，暂不自动登录外部网站" : "保存后 Agent 可在网页检索中限定该域名"}</span><button className="primary-action">保存数据源</button></footer></form>}
+    {formOpen && <form className="source-form" onSubmit={save}><header><div><h2>新增数据源</h2><p>免费来源用于限定域名检索；付费凭据只在本机加密保存</p></div><button type="button" onClick={() => setFormOpen(false)}><Icon name="x" size={18} /></button></header><div className="source-kind-switch"><button type="button" className={form.kind === "free" ? "active" : ""} onClick={() => setForm(value => ({ ...value, kind: "free" }))}>免费来源</button><button type="button" className={form.kind === "paid" ? "active" : ""} onClick={() => setForm(value => ({ ...value, kind: "paid" }))}>付费来源</button></div><label>数据源名称<input required value={form.name} onChange={event => setForm(value => ({ ...value, name: event.target.value }))} placeholder="例如：实验室论文库" /></label><label>网站或接口地址<input required type="url" value={form.base_url} onChange={event => setForm(value => ({ ...value, base_url: event.target.value }))} placeholder="https://example.org" /></label>{form.kind === "paid" && <div className="paid-fields"><label>账号<input required value={form.username} onChange={event => setForm(value => ({ ...value, username: event.target.value }))} autoComplete="off" /></label><label>密码<input required type="password" value={form.password} onChange={event => setForm(value => ({ ...value, password: event.target.value }))} autoComplete="new-password" /></label></div>}<footer><span>{form.kind === "paid" ? "使用当前 Windows 用户加密，暂不自动登录外部网站" : "保存后 Agent 可在网页检索中限定该域名"}</span><button className="primary-action">保存数据源</button></footer></form>}
     <div className="source-list">{sources.map(source => <article className={`source-card ${source.enabled ? "" : "disabled"}`} key={source.id}><div className="source-brand"><span>{source.name.slice(0, 2)}</span><div><h3>{source.name}</h3><p>{source.built_in ? `内置连接器 · ${source.connector}` : source.kind === "paid" ? "付费来源 · 本机凭据" : "免费网页来源"}</p></div></div><div className="source-url">{source.base_url}</div><div className={`source-health ${source.status}`}><i />{source.status === "available" ? "可访问" : source.status === "unavailable" ? "连接失败" : "未检测"}<small>{source.last_checked_at ? formatDate(source.last_checked_at) : ""}</small></div>{source.has_credentials && <span className="credential-chip">{source.username} · {source.masked_secret}</span>}<div className="source-actions"><button onClick={() => check(source)}>检测</button><button onClick={() => toggle(source)}>{source.enabled ? "停用" : "启用"}</button>{!source.built_in && (deleteId === source.id ? <span className="inline-confirm"><button className="danger-text" onClick={() => remove(source.id)}>确认删除</button><button onClick={() => setDeleteId("")}>取消</button></span> : <button className="danger-text" onClick={() => setDeleteId(source.id)}>删除</button>)}</div></article>)}</div>
   </>;
 }
@@ -197,7 +199,8 @@ function ThemePanel() {
     const saved = saveTheme({ ...next, name: selection === "custom" ? "自定义主题" : selection });
     applyTheme(saved); setTheme(saved); setSelected(selection); setStatus({ kind: "success", text: "外观已保存并应用到整个工作台" });
   };
-  const choose = item => commit(item.theme, item.name);
+  const choose = item => commit({ ...item.theme, type: theme.type }, item.name);
+  const chooseType = type => commit({ ...theme, type }, selected);
   const update = (section, key, value) => commit({ ...theme, [section]: { ...theme[section], [key]: value } });
   const reset = () => commit(DEFAULT_THEME, DEFAULT_THEME.name);
   const exportTheme = () => {
@@ -215,6 +218,10 @@ function ThemePanel() {
     <SectionHeading title="界面主题工作室" text="颜色、字体、布局和动效都由同一份主题配置控制" actions={<div className="theme-heading-actions"><button className="secondary-action compact-action" onClick={exportTheme}>导出 JSON</button><button className="secondary-action compact-action" onClick={() => importRef.current?.click()}>导入 JSON</button><button className="secondary-action compact-action" onClick={reset}>恢复默认</button><input ref={importRef} type="file" accept="application/json,.json" onChange={importTheme} hidden /></div>} />
     {status.text && <div className={`settings-alert ${status.kind}`}>{status.text}</div>}
     <div className="palette-grid">{THEME_PRESETS.map(item => <button className={`palette-card ${selected === item.name ? "active" : ""}`} key={item.name} onClick={() => choose(item)}><span className="palette-preview">{Object.values(item.theme.colors).slice(0, 5).map((color, index) => <i key={`${color}-${index}`} style={{ background: color }} />)}</span><strong>{item.name}</strong><small>{item.note}</small></button>)}</div>
+    <section className="theme-type-block">
+      <header><div><span>Type</span><h2>界面类型</h2><p>类型只改变操作界面的形态，不锁定颜色。上面的色板和下方自定义颜色都会继续生效。</p></div></header>
+      <div className="theme-type-grid">{THEME_TYPES.map(item => <button type="button" className={`theme-type-card ${theme.type === item.value ? "active" : ""} type-${item.value}`} key={item.value} onClick={() => chooseType(item.value)}><span className="type-preview" aria-hidden="true"><i /><i /><i /><i /></span><strong>{item.label}</strong><small>{item.note}</small></button>)}</div>
+    </section>
     <section className="custom-theme-card"><header><div><h2>全局颜色</h2><p>修改后立即覆盖所有页面、卡片、图表和状态</p></div>{selected === "custom" && <span>正在使用自定义主题</span>}</header><div className="color-fields">{COLOR_FIELDS.map(([key, label]) => <label key={key}><span>{label}</span><input aria-label={label} type="color" value={theme.colors[key]} onChange={event => update("colors", key, event.target.value)} /><code>{theme.colors[key]}</code></label>)}</div></section>
     <div className="theme-studio-grid">
       <section className="theme-control-card"><header><h2>字体与比例</h2><p>标题保留 Sci Agent 的编辑部气质，正文优先保证可读性。</p></header><label>标题字体<select value={theme.typography.display} onChange={event => update("typography", "display", event.target.value)}>{FONT_OPTIONS.display.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label><label>正文字体<select value={theme.typography.body} onChange={event => update("typography", "body", event.target.value)}>{FONT_OPTIONS.body.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label><label>字号比例 <output>{theme.typography.scale.toFixed(2)}×</output><input type="range" min="0.85" max="1.25" step="0.05" value={theme.typography.scale} onChange={event => update("typography", "scale", Number(event.target.value))} /></label></section>
@@ -252,5 +259,5 @@ function AccountPanel({ api, onAccountChange }) {
 
 export default function SettingsPage({ api, onAccountChange }) {
   const [section, setSection] = useState("quick");
-  return <main className="settings-page page-frame"><aside className="settings-nav">{SECTIONS.map(([key, icon, label]) => <button key={key} className={section === key ? "active" : ""} onClick={() => setSection(key)}><span>{icon}</span>{label}</button>)}</aside><section className="settings-content">{section === "quick" && <QuickSetup api={api} />}{section === "usage" && <UsagePanel api={api} />}{section === "sources" && <DataSourcesPanel api={api} />}{section === "theme" && <ThemePanel />}{section === "privacy" && <PrivacyPanel api={api} />}{section === "account" && <AccountPanel api={api} onAccountChange={onAccountChange} />}</section></main>;
+  return <main className="settings-page page-frame"><aside className="settings-nav">{SECTIONS.map(([key, icon, label]) => <button key={key} className={section === key ? "active" : ""} onClick={() => setSection(key)}><Icon name={icon} size={18} />{label}</button>)}</aside><section className="settings-content">{section === "quick" && <QuickSetup api={api} />}{section === "usage" && <UsagePanel api={api} />}{section === "sources" && <DataSourcesPanel api={api} />}{section === "theme" && <ThemePanel />}{section === "privacy" && <PrivacyPanel api={api} />}{section === "account" && <AccountPanel api={api} onAccountChange={onAccountChange} />}</section></main>;
 }

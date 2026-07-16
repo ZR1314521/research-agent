@@ -1,4 +1,2 @@
-interface:
-  display_name: "PubMed Database"
-  short_description: "Search PubMed and retrieve biomedical article metadata."
-  default_prompt: "Use $pubmed-database for this research task."
+model: gpt-5.6-sol
+reasoning_effort: medium

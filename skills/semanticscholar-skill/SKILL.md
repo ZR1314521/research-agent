@@ -1,9 +1,5 @@
----
-name: semanticscholar-skill
-description: Query Semantic Scholar for papers, abstracts, citations, references, and recommendations. Use for relevance search, citation traversal, and related-paper discovery.
----
+# semanticscholar-skill
 
-# Semantic Scholar
+Search Semantic Scholar only.
 
-Request only required fields. Use configured API key when present, handle throttling, preserve paper IDs and external IDs, and pass normalized results to the shared screening layer.
-
+Handler: search_semantic_scholar

@@ -107,9 +107,11 @@ class ContextManager:
         data: Any,
         artifacts: dict[str, Any],
         messages: list[dict[str, Any]],
+        ok: bool = True,
+        outcome: str = "success",
     ) -> dict[str, Any]:
         full: dict[str, Any] = {
-            "ok": True, "tool": tool, "message": message,
+            "ok": ok, "outcome": outcome, "tool": tool, "message": message,
             "data": data, "artifacts": artifacts,
         }
         self.observation_dir.mkdir(parents=True, exist_ok=True)
@@ -127,7 +129,7 @@ class ContextManager:
             if isinstance(data, dict) and key in data
         }
         compact: dict[str, Any] = {
-            "ok": True, "tool": tool, "message": message,
+            "ok": ok, "outcome": outcome, "tool": tool, "message": message,
             "artifacts": artifacts, "data_ref": str(path),
             "note": "The complete tool observation is stored locally and can be read on demand.",
             **delivery,
@@ -139,7 +141,8 @@ class ContextManager:
             compact["artifact_keys"] = list(artifacts)
         if self.estimate_tokens(compact) > allowance:
             compact = {
-                "ok": True,
+                "ok": ok,
+                "outcome": outcome,
                 "tool": tool,
                 "data_ref": str(path),
                 "note": "Complete tool observation stored locally.",

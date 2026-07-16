@@ -1,4 +1,2 @@
-interface:
-  display_name: "Read arXiv Paper"
-  short_description: "Retrieve and inspect one arXiv paper using public sources."
-  default_prompt: "Use $read-arxiv-paper for this research task."
+model: gpt-5.6-sol
+reasoning_effort: medium

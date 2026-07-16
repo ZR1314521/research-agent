@@ -108,3 +108,32 @@ test("theme controls apply presets and background options to the whole document"
 
   await act(async () => root.unmount());
 });
+
+test("pixel laboratory is an independent type and keeps custom colors live", async () => {
+  localStorage.clear();
+  global.fetch = jest.fn(async url => ({ ok: true, json: async () => responseFor(String(url)) }));
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  await act(async () => { root.render(<SettingsPage api="http://local.test" />); await Promise.resolve(); });
+
+  const themeSection = [...container.querySelectorAll(".settings-nav button")]
+    .find(item => item.textContent.includes("色彩设计"));
+  await act(async () => themeSection.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+
+  expect(container.textContent).toContain("Type");
+  const pixelType = [...container.querySelectorAll(".theme-type-card")]
+    .find(item => item.textContent.includes("像素实验室"));
+  await act(async () => pixelType.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+  expect(document.documentElement.dataset.themeType).toBe("pixel");
+
+  const pageColor = container.querySelector('input[aria-label="页面背景"]');
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(pageColor, "#123456");
+    pageColor.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(document.documentElement.dataset.themeType).toBe("pixel");
+  expect(document.documentElement.style.getPropertyValue("--theme-page")).toBe("#123456");
+  expect(JSON.parse(localStorage.getItem("research-agent-theme")).type).toBe("pixel");
+
+  await act(async () => root.unmount());
+});

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import re
 import threading
 import time as _time
 import urllib.error
@@ -71,6 +72,71 @@ def _response_text_length(value: Any) -> int:
     if isinstance(value, list):
         return sum(len(item.get("text", "")) for item in value if isinstance(item, dict) and isinstance(item.get("text"), str))
     return 0
+
+
+# DeepSeek and some other providers stream tool calls as text inside
+# ``content`` rather than using the native ``tool_calls`` array.  These
+# patterns match the known serialisation styles so we can extract the
+# payload, convert it to a native tool-call object, and strip it from
+# the user-visible response.
+_FUNCTION_CALLS_FENCE = re.compile(r"<function_calls>[\s\S]*?</function_calls>", re.IGNORECASE)
+_INVOKE_PATTERN = re.compile(r"<invoke\s+name\s*=\s*\"([^\"]+)\">[\s\S]*?</invoke>", re.IGNORECASE)
+_PARAM_PATTERN = re.compile(r"<parameter\s+name\s*=\s*\"([^\"]+)\"(?:\s+string\s*=\s*\"(true|false)\")?>([\s\S]*?)</parameter>", re.IGNORECASE)
+_DSML_FENCE = re.compile(r"(?:【|\[)(?:【|\[)?\s*([a-zA-Z_][a-zA-Z0-9_-]*)\s*(?:】|\])[\s\S]*?(?:】|\])", re.IGNORECASE)
+
+
+def _strip_tool_call_text(text: str) -> str:
+    """Remove *all* known tool-call serialisations from user-visible content."""
+    if not text:
+        return ""
+    cleaned = _FUNCTION_CALLS_FENCE.sub("", text)
+    cleaned = _DSML_FENCE.sub("", cleaned)
+    return cleaned.strip()
+
+
+def _extract_xml_tool_calls(text: str) -> list[dict[str, Any]]:
+    """Parse ``<function_calls><invoke …>…`` blocks into native tool-call dicts."""
+    calls: list[dict[str, Any]] = []
+    for block in _FUNCTION_CALLS_FENCE.findall(text):
+        for invoke in _INVOKE_PATTERN.finditer(block):
+            name = invoke.group(1)
+            params: dict[str, Any] = {}
+            for param in _PARAM_PATTERN.finditer(invoke.group(0)):
+                key = param.group(1)
+                is_json = param.group(2)
+                raw = param.group(3).strip()
+                try:
+                    params[key] = json.loads(raw) if is_json == "true" else raw
+                except (json.JSONDecodeError, TypeError):
+                    params[key] = raw
+            if name:
+                calls.append({
+                    "id": f"dsml-{len(calls)}",
+                    "type": "function",
+                    "function": {"name": name, "arguments": json.dumps(params, ensure_ascii=False)},
+                })
+    return calls
+
+
+def _extract_tool_calls_from_content(text: str) -> tuple[str, list[dict[str, Any]]]:
+    """Return (cleaned_text, extra_tool_calls) after extracting embedded tool calls."""
+    if not text:
+        return "", []
+    extra = _extract_xml_tool_calls(text)
+    cleaned = _strip_tool_call_text(text)
+    return cleaned, extra
+
+
+def _is_inside_fence(text: str) -> bool:
+    """True when *text* looks like it is mid-way through a DSML / XML tool-call
+    block.  Used during streaming to suppress partial blocks from being emitted
+    as user-visible content."""
+    if not text:
+        return False
+    # XML format: opened but not yet closed
+    if "<function_calls>" in text and "</function_calls>" not in text:
+        return True
+    return False
 
 
 def _normalize_response(data: Any) -> NormalizedResponse:
@@ -165,6 +231,16 @@ class OpenAICompatibleProvider:
         calls: dict[int, dict[str, Any]] = {}
         finish_reason = ""
         usage: dict[str, Any] = {}
+        # Buffer deltas so we can suppress DSML / XML tool-call text that
+        # some providers stream inside ``content``.  Once a complete block
+        # (or clean text) is assembled we flush the clean portion.
+        text_buf: list[str] = []
+        def _flush_clean() -> None:
+            merged = "".join(text_buf)
+            clean = _strip_tool_call_text(merged)
+            if clean:
+                on_event(ProviderEvent("assistant_delta", {"text": clean}))
+            text_buf.clear()
         for raw in lines:
             line = raw.decode("utf-8", errors="replace").strip() if isinstance(raw, bytes) else str(raw).strip()
             if line.lstrip().lower().startswith(("<!", "<html")):
@@ -189,7 +265,9 @@ class OpenAICompatibleProvider:
             text = delta.get("content")
             if isinstance(text, str) and text:
                 content.append(text)
-                on_event(ProviderEvent("assistant_delta", {"text": text}))
+                text_buf.append(text)
+                if not _is_inside_fence("".join(text_buf)):
+                    _flush_clean()
             thought = delta.get("reasoning_content")
             if isinstance(thought, str) and thought:
                 reasoning.append(thought)
@@ -209,7 +287,13 @@ class OpenAICompatibleProvider:
                     if function.get("arguments"):
                         call["function"]["arguments"] += str(function["arguments"])
                     on_event(ProviderEvent("tool_call_delta", {"index": index, "fragment": fragment}))
-        message: dict[str, Any] = {"role": "assistant", "content": "".join(content) or None}
+        _flush_clean()
+        raw_content = "".join(content)
+        cleaned, extra_calls = _extract_tool_calls_from_content(raw_content)
+        for ec in extra_calls:
+            idx = len(calls)
+            calls[idx] = ec
+        message: dict[str, Any] = {"role": "assistant", "content": cleaned or None}
         if reasoning:
             message["reasoning_content"] = "".join(reasoning)
         if calls:

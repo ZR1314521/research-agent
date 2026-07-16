@@ -365,15 +365,28 @@ class AgentLoop:
             except ContractError as exc:
                 all_direct_delivery = False
                 payload = exc.as_observation(spec.name)
-                self.sessions.event(session, "tool_observed", spec.name, str(exc), ok=False, error_code=exc.code, turn=turn)
+                self.sessions.event(session, "tool_observed", spec.name, str(exc), ok=False, outcome="failed", error_code=exc.code, turn=turn)
+                if self.event_sink:
+                    self.event_sink(ProviderEvent("tool_result", {
+                        "tool": spec.name, "ok": False, "outcome": "failed", "message": str(exc),
+                        "artifacts": {}, "turn": turn, "metrics": {},
+                    }))
                 if self.progress:
                     self.progress("failed", spec.name)
                 self._append_tool_message(messages, call_id, payload)
                 continue
             except Exception as exc:
                 all_direct_delivery = False
-                payload = {"ok": False, "tool": spec.name, "error": str(exc)}
-                self.sessions.event(session, "tool_observed", spec.name, str(exc), ok=False, turn=turn)
+                error = str(exc)
+                code = getattr(exc, "code", None)
+                outcome = "rate_limited" if code == 429 or self._is_rate_limit(error) else "failed"
+                payload = {"ok": False, "outcome": outcome, "tool": spec.name, "error": error}
+                self.sessions.event(session, "tool_observed", spec.name, error, ok=False, outcome=outcome, turn=turn)
+                if self.event_sink:
+                    self.event_sink(ProviderEvent("tool_result", {
+                        "tool": spec.name, "ok": False, "outcome": outcome, "message": error,
+                        "artifacts": {}, "turn": turn, "metrics": {},
+                    }))
                 if self.progress:
                     self.progress("failed", spec.name)
                 self._append_tool_message(messages, call_id, payload)
@@ -392,11 +405,14 @@ class AgentLoop:
                 session.artifact_dependencies[key] = [spec.name]
             session.metadata["last_skill"] = spec.name
             model_data = tool_result.get("model_data", tool_result.get("data", {}))
+            outcome = str(tool_result.get("outcome") or "success")
+            tool_ok = outcome in {"success", "partial"}
             if isinstance(model_data, dict) and model_data.get("answer_ready") is True:
                 state.answer_ready = True
                 state.completion_guidance = str(model_data.get("completion_guidance") or "").strip()
             full_observation = {
-                "ok": True,
+                "ok": tool_ok,
+                "outcome": outcome,
                 "tool": spec.name,
                 "message": str(tool_result.get("message") or ""),
                 "data": model_data,
@@ -405,30 +421,42 @@ class AgentLoop:
             observation = self.context.observation(
                 tool=spec.name, message=full_observation["message"], data=full_observation["data"],
                 artifacts=full_observation["artifacts"], messages=messages,
+                ok=tool_ok, outcome=outcome,
             )
             persistent_observation = {
                 key: value for key, value in observation.items() if key != "data"
             }
             session.observations.append(persistent_observation)
             session.metadata["last_result"] = persistent_observation
-            state.last_success = full_observation["message"] or state.last_success
-            if spec.direct_delivery and full_observation["message"]:
+            if tool_ok:
+                state.last_success = full_observation["message"] or state.last_success
+            if spec.direct_delivery and tool_ok and full_observation["message"]:
                 direct_messages.append(full_observation["message"])
             progress = tool_result.get("progress") if isinstance(tool_result.get("progress"), dict) else {}
-            public_message = str(progress.get("summary") or "步骤已完成")
-            self.sessions.event(session, "tool_observed", spec.name, public_message, artifacts=visible_artifacts, ok=True, turn=turn, metrics=dict(progress.get("metrics") or {}))
+            public_message = str(progress.get("summary") or full_observation["message"] or "工具已返回结果")
+            event_artifacts = visible_artifacts if outcome in {"success", "partial"} else {}
+            self.sessions.event(
+                session, "tool_observed", spec.name, public_message,
+                artifacts=event_artifacts, ok=tool_ok, outcome=outcome,
+                turn=turn, metrics=dict(progress.get("metrics") or {}),
+            )
             if self.event_sink:
                 self.event_sink(ProviderEvent("tool_result", {
-                    "tool": spec.name, "ok": True, "message": public_message,
-                    "artifacts": visible_artifacts, "turn": turn,
+                    "tool": spec.name, "ok": tool_ok, "outcome": outcome, "message": public_message,
+                    "artifacts": event_artifacts, "turn": turn,
                     "metrics": dict(progress.get("metrics") or {}),
                 }))
             if self.progress:
-                self.progress("done", spec.name)
+                self.progress("failed" if outcome in {"failed", "rate_limited"} else "done", spec.name)
             self._append_tool_message(messages, call_id, observation)
         if all_direct_delivery and direct_messages:
             return self._finish(session, "\n\n".join(direct_messages), state.last_skill, messages)
         return None
+
+    @staticmethod
+    def _is_rate_limit(error: str) -> bool:
+        value = str(error or "").lower()
+        return "429" in value or "too many" in value or "rate limit" in value or "rate_limited" in value
 
     def _pause_for_tool_approval(
         self,

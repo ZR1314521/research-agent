@@ -1,9 +1,5 @@
----
-name: read-arxiv-paper
-description: Retrieve and inspect one arXiv paper from an arXiv URL or identifier. Use for deeper reading when abstract metadata is insufficient.
----
+# read-arxiv-paper
 
-# Read arXiv Paper
+Read one arXiv paper from a URL or identifier.
 
-Normalize the arXiv identifier, prefer public source or PDF text, and save extracted evidence locally. Distinguish statements supported by full text from statements supported only by the abstract.
-
+Handler: read_arxiv

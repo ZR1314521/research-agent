@@ -5,22 +5,20 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ProjectRoot = $PSScriptRoot
 $ProjectPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
 $FallbackPython = Join-Path $env:LOCALAPPDATA "Python\bin\python.exe"
 $Python = if (Test-Path -LiteralPath $ProjectPython) { $ProjectPython } else { $FallbackPython }
 $Workbench = Join-Path $ProjectRoot "workbench"
-$ReactScripts = Join-Path $Workbench "node_modules\.bin\react-scripts.cmd"
 $Npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
 $ApiArgs = @("-m", "uvicorn", "research_agent.app:app", "--host", "127.0.0.1", "--port", "$ApiPort")
 $ApiBase = "http://127.0.0.1:$ApiPort"
 
 Write-Output "[api] $Python $($ApiArgs -join ' ')"
-Write-Output "[workbench] npm --prefix $Workbench start"
+Write-Output "[workbench] npm start in '$Workbench'"
 if ($DryRun) { return }
 if (-not (Test-Path -LiteralPath $Python)) { throw "Missing Python runtime: $Python. FastAPI/Uvicorn must be installed there." }
 if (-not $Npm) { throw "Missing npm command. Install Node.js before starting the React workbench." }
-if (-not (Test-Path -LiteralPath $ReactScripts)) { throw "Missing local React artifact: $ReactScripts. This no-install bootstrap will not download it; provide the workbench node_modules dependencies offline first." }
 $ExpectedVersion = (& $Python -c "from research_agent.version import RUNTIME_VERSION; print(RUNTIME_VERSION)").Trim()
 
 $ApiProcess = $null
@@ -67,7 +65,8 @@ try {
         if (-not $Ready) { throw "The backend did not become ready within 10 seconds." }
     }
     $env:REACT_APP_API_BASE = $ApiBase
-    $WorkbenchProcess = Start-Process -FilePath $Npm.Source -ArgumentList @("--prefix", $Workbench, "start") -WorkingDirectory $ProjectRoot -WindowStyle Hidden -PassThru
+    $env:REACT_APP_API_PORT = "$ApiPort"
+    $WorkbenchProcess = Start-Process -FilePath $Npm.Source -ArgumentList @("start") -WorkingDirectory $Workbench -WindowStyle Hidden -PassThru
 } catch {
     if ($ApiProcess) { Stop-Process -Id $ApiProcess.Id -Force -ErrorAction SilentlyContinue }
     if ($WorkbenchProcess) { Stop-Process -Id $WorkbenchProcess.Id -Force -ErrorAction SilentlyContinue }

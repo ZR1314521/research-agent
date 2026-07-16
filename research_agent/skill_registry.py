@@ -20,10 +20,12 @@ def _schema(properties: dict[str, str], *, required: tuple[str, ...] = (), any_o
 # of every public handler, shared by the prompt catalog and execution boundary.
 DECLARED_CONTRACTS: dict[str, dict[str, Any]] = {
     "workflow_state": {"input_schema": _schema({"command": "string", "limit": "integer"}), "produces": ("SessionState",)},
-    "search_literature": {"input_schema": _schema({"query": "string", "queries": "array", "year_from": "integer", "year_to": "integer", "venues": "array", "sources": "array", "limit": "integer", "rounds": "integer", "max_requests_per_source": "integer", "must_include": "array", "exclude": "array", "sort_by": "string", "precise": "boolean", "output_path": "string"}, any_of=("query", "queries")), "produces": ("PaperPool",), "artifact_types": {"active_papers": "ScreenedPaperPool", "raw_papers": "PaperPool", "excluded_papers": "PaperPool", "edge_papers": "PaperPool", "recursive_search_plan": "File", "paper_pool_markdown": "PaperPool"}, "artifact_profiles": {"paper_pool_markdown": {"presentation": "supporting", "label": "筛选后的文献池", "summary": "去重并筛选后的论文清单"}, "requested_output": {"presentation": "primary", "label": "文献检索结果"}}},
+    "search_literature": {"input_schema": _schema({"query": "string", "queries": "array", "year_from": "integer", "year_to": "integer", "venues": "array", "sources": "array", "limit": "integer", "rounds": "integer", "max_requests_per_source": "integer", "must_include": "array", "exclude": "array", "sort_by": "string", "precise": "boolean", "output_path": "string"}, required=("sources",), any_of=("query", "queries")), "produces": ("PaperPool",), "artifact_types": {"active_papers": "ScreenedPaperPool", "raw_papers": "PaperPool", "excluded_papers": "PaperPool", "edge_papers": "PaperPool", "recursive_search_plan": "File", "paper_pool_markdown": "PaperPool"}, "artifact_profiles": {"paper_pool_markdown": {"presentation": "supporting", "label": "筛选后的文献池", "summary": "去重并筛选后的论文清单"}, "requested_output": {"presentation": "primary", "label": "文献检索结果"}}},
     "search_openalex": {"input_schema": _schema({"query": "string", "queries": "array", "year_from": "integer", "year_to": "integer", "limit": "integer", "must_include": "array", "exclude": "array", "venues": "array", "precise": "boolean"}, any_of=("query", "queries")), "produces": ("PaperPool",), "artifact_types": {"active_papers": "ScreenedPaperPool", "raw_papers": "PaperPool", "excluded_papers": "PaperPool", "edge_papers": "PaperPool", "recursive_search_plan": "File", "paper_pool_markdown": "PaperPool"}, "artifact_profiles": {"paper_pool_markdown": {"presentation": "supporting", "label": "筛选后的文献池", "summary": "去重并筛选后的论文清单"}}},
     "search_pubmed": {"input_schema": _schema({"query": "string", "queries": "array", "year_from": "integer", "year_to": "integer", "limit": "integer", "must_include": "array", "exclude": "array", "venues": "array", "precise": "boolean"}, any_of=("query", "queries")), "produces": ("PaperPool",), "artifact_types": {"active_papers": "ScreenedPaperPool", "raw_papers": "PaperPool", "excluded_papers": "PaperPool", "edge_papers": "PaperPool", "recursive_search_plan": "File", "paper_pool_markdown": "PaperPool"}, "artifact_profiles": {"paper_pool_markdown": {"presentation": "supporting", "label": "筛选后的文献池", "summary": "去重并筛选后的论文清单"}}},
     "search_semantic_scholar": {"input_schema": _schema({"query": "string", "queries": "array", "year_from": "integer", "year_to": "integer", "limit": "integer", "must_include": "array", "exclude": "array", "venues": "array", "precise": "boolean"}, any_of=("query", "queries")), "produces": ("PaperPool",), "artifact_types": {"active_papers": "ScreenedPaperPool", "raw_papers": "PaperPool", "excluded_papers": "PaperPool", "edge_papers": "PaperPool", "recursive_search_plan": "File", "paper_pool_markdown": "PaperPool"}, "artifact_profiles": {"paper_pool_markdown": {"presentation": "supporting", "label": "筛选后的文献池", "summary": "去重并筛选后的论文清单"}}},
+    "search_crossref": {"input_schema": _schema({"query": "string", "queries": "array", "year_from": "integer", "year_to": "integer", "limit": "integer", "must_include": "array", "exclude": "array", "venues": "array", "precise": "boolean"}, any_of=("query", "queries")), "produces": ("PaperPool",), "artifact_types": {"active_papers": "ScreenedPaperPool", "raw_papers": "PaperPool", "excluded_papers": "PaperPool", "edge_papers": "PaperPool", "recursive_search_plan": "File", "paper_pool_markdown": "PaperPool"}, "artifact_profiles": {"paper_pool_markdown": {"presentation": "supporting", "label": "筛选后的文献池", "summary": "去重并筛选后的论文清单"}}},
+    "search_arxiv": {"input_schema": _schema({"query": "string", "queries": "array", "year_from": "integer", "year_to": "integer", "limit": "integer", "must_include": "array", "exclude": "array", "venues": "array", "precise": "boolean"}, any_of=("query", "queries")), "produces": ("PaperPool",), "artifact_types": {"active_papers": "ScreenedPaperPool", "raw_papers": "PaperPool", "excluded_papers": "PaperPool", "edge_papers": "PaperPool", "recursive_search_plan": "File", "paper_pool_markdown": "PaperPool"}, "artifact_profiles": {"paper_pool_markdown": {"presentation": "supporting", "label": "筛选后的文献池", "summary": "去重并筛选后的论文清单"}}},
     "screen_papers": {"input_schema": _schema({"query": "string", "topic": "string", "keywords": "string", "year_from": "integer", "year_to": "integer", "venues": "array", "must_include": "array", "exclude": "array", "precise": "boolean"}), "consumes": ("PaperPool",), "produces": ("ScreenedPaperPool",), "artifact_types": {"active_papers": "ScreenedPaperPool", "excluded_papers": "PaperPool", "edge_papers": "PaperPool"}},
     "summarize_papers": {"input_schema": _schema({"limit": "integer"}), "consumes": ("PaperPool",), "produces": ("EvidenceMatrix",), "artifact_types": {"literature_matrix_json": "EvidenceMatrix", "literature_matrix_csv": "EvidenceMatrix", "literature_matrix_md": "EvidenceMatrix"}, "artifact_profiles": {"literature_matrix_md": {"presentation": "supporting", "label": "文献证据矩阵"}, "literature_matrix_csv": {"presentation": "supporting", "label": "证据矩阵数据"}}},
     "analyze_experiment": {"input_schema": _schema({"path": "string", "column_roles": "object", "trend_specs": "array", "group_specs": "array", "chart_specs": "array", "outlier_method": "string"}), "produces": ("AnalysisReport", "Image"), "artifact_types": {"analysis_summary": "AnalysisReport", "analysis_report": "AnalysisReport", "outlier_flags": "Dataset", "analysis_plan": "File"}, "artifact_profiles": {"analysis_summary": {"presentation": "internal", "label": "统计分析数据"}, "analysis_report": {"presentation": "primary", "label": "完整分析报告"}, "outlier_flags": {"presentation": "supporting", "label": "异常值标记数据"}, "chart_*": {"presentation": "primary", "label": "分析图表"}}},
@@ -46,7 +48,8 @@ DECLARED_CONTRACTS: dict[str, dict[str, Any]] = {
     "workspace_files": {"input_schema": _schema({"operation": "string", "path": "string", "target_path": "string", "text": "string", "query": "string", "offset": "integer", "limit": "integer", "tail": "boolean", "max_results": "integer", "confirmed": "boolean"}, required=("operation",)), "produces": ("File",), "artifact_types": {"workspace_file": "File", "recycled_file": "File"}},
     "acquire_open_access_papers": {"input_schema": _schema({"indexes": "array", "output_dir": "string"}), "consumes": ("PaperPool",), "produces": ("OpenAccessPDF",), "artifact_types": {"open_access_manifest": "File", "open_access_pdf_*": "OpenAccessPDF"}, "artifact_profiles": {"open_access_pdf_*": {"presentation": "supporting", "label": "开放获取论文"}, "open_access_manifest": {"presentation": "supporting", "label": "论文下载清单"}}},
     "create_reading_copy": {"input_schema": _schema({"output_name": "string"}), "consumes": ("OpenAccessPDF",), "produces": ("WordDocument",), "artifact_types": {"reading_copy_docx": "WordDocument"}, "artifact_profiles": {"reading_copy_docx": {"presentation": "primary", "label": "论文阅读副本"}}},
-    "web_search": {"input_schema": _schema({"query": "string", "site": "string", "limit": "integer"}, required=("query",)), "produces": ("WebSearchResults",)},
+    "web_search": {"input_schema": _schema({"query": "string", "site": "string", "limit": "integer"}, required=("query", "site")), "produces": ("WebSearchResults",)},
+    "web_search_http": {"input_schema": _schema({"query": "string", "provider": "string", "limit": "integer"}, required=("query", "provider")), "produces": ("WebSearchResults",)},
     "run_code": {"input_schema": _schema({"code": "string", "timeout": "integer"}, required=("code",)), "produces": ("AnalysisReport",)},
     "web_fetch": {"input_schema": _schema({"url": "string", "output_dir": "string", "timeout": "integer"}, required=("url",)), "produces": ("OpenAccessPDF", "ResearchText")},
     "git": {"input_schema": _schema({"command": "string", "cwd": "string"}, required=("command",)), "produces": ("File",)},
@@ -78,6 +81,7 @@ class SkillSpec:
     batch_policy: str = "allow"
     direct_delivery: bool = False
     timeout_seconds: int = 60
+    aliases: tuple[str, ...] = ()
 
 
 class SkillRegistry:
@@ -92,8 +96,13 @@ class SkillRegistry:
             if not spec.output_schema:
                 merged["output_schema"] = OUTPUT_SCHEMA
             specs.append(replace(spec, **merged))
-        self._skills = {spec.name: spec for spec in specs}
-        if len(self._skills) != len(specs):
+        self._skills: dict[str, SkillSpec] = {spec.name: spec for spec in specs}
+        for spec in specs:
+            for alias in spec.aliases:
+                if alias in self._skills:
+                    raise ValueError(f"Alias {alias} conflicts with a registered skill name")
+                self._skills[alias] = spec
+        if len(set(spec.name for spec in specs)) != len(specs):
             raise ValueError("Duplicate skill name in skills/registry.json")
         self.validate()
 
@@ -131,9 +140,17 @@ class SkillRegistry:
         ]
 
     def tool_catalog(self) -> list[dict[str, Any]]:
-        """Declarative capability catalog for the model; execution stays local."""
-        return [
-            {
+        """Declarative capability catalog for the model; execution stays local.
+
+        Aliases are filtered out so every tool appears exactly once.
+        """
+        seen: set[str] = set()
+        result: list[dict[str, Any]] = []
+        for item in self._skills.values():
+            if not item.planner_visible or item.name in seen:
+                continue
+            seen.add(item.name)
+            result.append({
                 "name": item.name,
                 "description": item.description,
                 "kind": item.kind,
@@ -150,10 +167,8 @@ class SkillRegistry:
                 "parallel_safe": item.parallel_safe,
                 "batch_policy": item.batch_policy,
                 "direct_delivery": item.direct_delivery,
-            }
-            for item in self._skills.values()
-            if item.planner_visible
-        ]
+            })
+        return result
 
     def instructions(self, name: str) -> str:
         self.get(name)

@@ -1,0 +1,3 @@
+display_name: Web Fetch
+short_description: Fetch content from a URL. Download PDFs or read web pages.
+default_prompt: Fetch the given URL and return its content.

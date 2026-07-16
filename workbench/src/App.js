@@ -5,13 +5,34 @@ import TopNav, { BrandMark } from "./components/TopNav";
 import ApprovalDock from "./components/ApprovalDock";
 import ArtifactList from "./components/ArtifactList";
 import ContextMeter from "./components/ContextMeter";
+import Icon from "./components/Icon";
 import HomePage from "./pages/HomePage";
 import SettingsPage from "./pages/SettingsPage";
 import TaskCenterPage from "./pages/TaskCenterPage";
 import { applyTheme, loadTheme } from "./theme";
 
-const API = String(process.env.REACT_APP_API_BASE || "http://127.0.0.1:8878").replace(/\/$/, "");
+const API_PORT = process.env.REACT_APP_API_PORT || "8878";
+const API_HOST = process.env.REACT_APP_API_HOST || "127.0.0.1";
+const API = String(process.env.REACT_APP_API_BASE || `http://${API_HOST}:${API_PORT}`).replace(/\/$/, "");
 const BUSY = new Set(["running", "pause_requested", "paused", "waiting_approval", "rate_limited"]);
+
+export function outcomeStepStatus(outcome, ok = true) {
+  return ({
+    success: "completed", partial: "partial", empty: "empty",
+    rate_limited: "rate_limited", failed: "failed", cancelled: "cancelled",
+  })[outcome] || (ok === false ? "failed" : "completed");
+}
+
+function stepStateLabel(status) {
+  return ({
+    completed: "已完成", partial: "部分完成", empty: "无结果", rate_limited: "来源限流",
+    failed: "失败", cancelled: "已取消", running: "执行中", queued: "已排队",
+  })[status] || "已完成";
+}
+
+function stepStateIcon(status) {
+  return ({ running: "…", failed: "×", rate_limited: "!", partial: "!", empty: "○", cancelled: "–" })[status] || "✓";
+}
 
 function initialPage() {
   const value = window.location.hash.replace(/^#\/?/, "");
@@ -34,11 +55,11 @@ function fileName(path) {
 function WorkflowInspector({ runId, steps, artifacts, onClose }) {
   return (
     <aside className="run-inspector" aria-label="任务检查器">
-      <header><button type="button" className="inspector-close" onClick={onClose} aria-label="关闭任务详情">×</button><span>Task details</span><h2>任务轨迹</h2><p>这里只展示可理解的步骤与成果，不展示内部日志和模型原始数据。</p></header>
+      <header><button type="button" className="inspector-close" onClick={onClose} aria-label="关闭任务详情"><Icon name="x" size={18} /></button><span>Task details</span><h2>任务轨迹</h2><p>这里只展示可理解的步骤与成果，不展示内部日志和模型原始数据。</p></header>
       <section className="inspector-section">
         <div className="inspector-heading"><h3>执行步骤</h3><span>{steps.length}</span></div>
         <div className="inspector-steps">
-          {steps.map(step => <article key={step.id || `${step.skill}-${step.started_at}`} className={`inspector-step ${step.status}`}><i /><div><strong>{step.status === "running" ? "正在处理" : step.summary || "已完成步骤"}</strong><span>{step.status === "completed" ? "已完成" : step.status === "failed" ? "失败" : step.status === "cancelled" ? "已取消" : step.status === "running" ? "执行中" : "已排队"}</span></div></article>)}
+          {steps.map(step => <article key={step.id || `${step.skill}-${step.started_at}`} className={`inspector-step ${step.status}`}><i /><div><strong>{step.status === "running" ? "正在处理" : step.summary || stepStateLabel(step.status)}</strong><span>{stepStateLabel(step.status)}</span></div></article>)}
           {!steps.length && <p className="inspector-empty">尚未执行工具。对话与一般问答不会伪造工作流步骤。</p>}
         </div>
       </section>
@@ -48,6 +69,55 @@ function WorkflowInspector({ runId, steps, artifacts, onClose }) {
         {!Object.keys(artifacts || {}).length && <p className="inspector-empty">产物生成后会在这里显示预览或文件路径。</p>}
       </section>
     </aside>
+  );
+}
+
+function CollapsibleReasoning({ text }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="reasoning-block">
+      <button type="button" className="reasoning-toggle" onClick={() => setOpen(v => !v)}>
+        <Icon name={open ? "chevronDown" : "chevronRight"} size={14} />
+        <span>{open ? "收起思考过程" : "查看思考过程"}</span>
+      </button>
+      {open && <div className="reasoning-body"><ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown></div>}
+    </div>
+  );
+}
+
+function CollapsibleStep({ step }) {
+  const summary = step.summary || stepStateLabel(step.status);
+  const isLong = summary.length > 80;
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={`execution-step ${step.status}`}>
+      <span>{stepStateIcon(step.status)}</span>
+      <div className="execution-step-body">
+        <div className="execution-step-head">
+          <strong>{step.status === "running" ? "正在处理" : step.tool}</strong>
+          {isLong && (
+            <button type="button" className="step-toggle" onClick={() => setOpen(v => !v)}>
+              {open ? "收起" : "查看详情"}
+            </button>
+          )}
+        </div>
+        {(!isLong || open) && <small>{summary}</small>}
+      </div>
+    </div>
+  );
+}
+
+function CollapsibleCode({ language, children }) {
+  const [open, setOpen] = useState(false);
+  const label = language ? `技术输出（${language}）` : "技术输出";
+  return (
+    <span className="code-collapse-block">
+      <button type="button" className="code-collapse-toggle" onClick={() => setOpen(v => !v)}>
+        <Icon name={open ? "chevronDown" : "chevronRight"} size={14} />
+        <span>{open ? "收起" : "查看"}{label}</span>
+      </button>
+      {open && <pre><code className={language ? `language-${language}` : ""}>{children}</code></pre>}
+    </span>
   );
 }
 
@@ -66,9 +136,9 @@ function WorkspacePage({
   return (
     <main className="workspace-page page-frame">
       <aside className="conversation-sidebar">
-        <button onClick={onNewRun} className="new-session-button"><span>＋</span>新建会话</button>
+        <button onClick={onNewRun} className="new-session-button"><Icon name="plus" className="btn-icon" />新建会话</button>
         <button className={`delete-session-button ${deleteMode ? "active" : ""}`} onClick={onDeleteSessions}>
-          <span>⌫</span>{deleteMode && selectedSessions.size ? `删除会话（${selectedSessions.size}）` : "删除会话"}
+          <Icon name="trash" className="btn-icon" />{deleteMode && selectedSessions.size ? `删除会话（${selectedSessions.size}）` : "删除会话"}
         </button>
         <div className="sidebar-section-title"><span>历史会话</span><small>{sessions.length}</small></div>
         <div className="session-list">
@@ -86,13 +156,13 @@ function WorkspacePage({
                   } else onSwitchSession(session.run_id);
                 }}
               >
-                <span className="session-icon">▤</span>
+                <span className="session-icon"><Icon name="document" size={16} /></span>
                 <span className="session-body"><strong>{session.title || "新会话"}</strong><small>{String(session.updated_at || session.created_at || "").slice(0, 10)}</small></span>
                 {deleteMode && <span className={`selection-dot ${selected ? "checked" : ""}`}>{selected ? "✓" : ""}</span>}
               </button>
             );
           })}
-          {!sessions.length && <div className="sidebar-empty"><span>⌁</span><p>还没有历史会话</p></div>}
+          {!sessions.length && <div className="sidebar-empty"><Icon name="activity" size={28} /><p>还没有历史会话</p></div>}
         </div>
         {deleteMode && <button className="cancel-selection" onClick={() => { setDeleteMode(false); setSelectedSessions(new Set()); }}>取消选择</button>}
       </aside>
@@ -106,9 +176,9 @@ function WorkspacePage({
           <div className="workspace-header-actions">
             <button type="button" className="task-details-button" onClick={() => setDetailsOpen(true)}>任务详情{detailCount ? ` ${detailCount}` : ""}</button>
             <ContextMeter modelName={modelName} contextSize={contextSize} contextWindow={contextWindow} />
-            <button type="button" onClick={() => control("pause")} disabled={turnState !== "running"}>Ⅱ 暂停</button>
-            <button type="button" onClick={() => control("resume")} disabled={!(["paused", "rate_limited"].includes(turnState))}>▶ 恢复</button>
-            <button type="button" className="danger-soft" onClick={() => control("cancel")} disabled={!BUSY.has(turnState)}>× 取消</button>
+            <button type="button" onClick={() => control("pause")} disabled={turnState !== "running"}><Icon name="pause" className="btn-icon" />暂停</button>
+            <button type="button" onClick={() => control("resume")} disabled={!(["paused", "pause_requested", "rate_limited"].includes(turnState))}><Icon name="play" className="btn-icon" />恢复</button>
+            <button type="button" className="danger-soft" onClick={() => control("cancel")} disabled={!BUSY.has(turnState)}><Icon name="x" className="btn-icon" />取消</button>
           </div>
         </header>
 
@@ -137,14 +207,22 @@ function WorkspacePage({
                 >
                   <header><span>{isUser ? "你" : item.role === "system" ? "系统" : "Research Agent"}</span>{msgDeleteMode && <i>{selected ? "✓ 已选择" : "点击选择"}</i>}</header>
                   {(item.steps || []).length > 0 && <div className="execution-steps">
-                    {(item.steps || []).map(step => <div key={step.key} className={`execution-step ${step.status}`}><span>{step.status === "running" ? "…" : step.status === "failed" ? "×" : "✓"}</span><p><strong>{step.status === "running" ? "正在处理" : step.summary || "步骤已完成"}</strong></p></div>)}
+                    {(item.steps || []).map(step => <CollapsibleStep key={step.key} step={step} />)}
                   </div>}
+                  {item.reasoning && <CollapsibleReasoning text={item.reasoning} />}
                   {item.content && (isUser || item.role === "system"
                     ? <div className="message-content plain-message">{item.content}</div>
                     : <ReactMarkdown
                         className="message-content markdown-message"
                         remarkPlugins={[remarkGfm]}
-                        components={{ a: props => <a {...props} target="_blank" rel="noreferrer" /> }}
+                        components={{
+                          a: props => <a {...props} target="_blank" rel="noreferrer" />,
+                          code: ({ inline, className, children }) => {
+                            if (inline) return <code className={className}>{children}</code>;
+                            const match = /language-(\w+)/.exec(className || "");
+                            return <CollapsibleCode language={match ? match[1] : ""}>{String(children).replace(/\n$/, "")}</CollapsibleCode>;
+                          },
+                        }}
                       >{item.content}</ReactMarkdown>)}
                   {item.streaming && !item.content && !(item.steps || []).length && <div className="thinking-indicator"><i /><i /><i /><span>正在理解任务</span></div>}
                   <ArtifactList api={API} runId={runId} artifacts={item.artifacts} />
@@ -162,7 +240,7 @@ function WorkspacePage({
         <section className="composer-panel">
           <div className="composer-toolbar">
             <form onSubmit={upload} className="upload-form">
-              <label htmlFor="workspace-files" className="tool-button">⌕ 上传文件</label>
+              <label htmlFor="workspace-files" className="tool-button"><Icon name="search" className="btn-icon" />上传文件</label>
               <input id="workspace-files" type="file" multiple onChange={event => setFiles(Array.from(event.target.files || []))} disabled={busy} />
               {files.length > 0 && <button className="upload-ready" disabled={!runId || busy}>上传（{files.length}）</button>}
             </form>
@@ -170,8 +248,8 @@ function WorkspacePage({
               <option value="" disabled>格式转换</option>
               {styleGroups.map(group => <optgroup key={group.group} label={group.group}>{group.items.map(style => <option key={style.key} value={style.key}>{style.name}</option>)}</optgroup>)}
             </select>
-            <button className={`tool-button ${planActive ? "active" : ""}`} onClick={() => startTurn("/plan", false)} disabled={busy}>{planActive ? "✓ 计划模式" : "▣ 计划模式"}</button>
-            <button className={`tool-button ${msgDeleteMode ? "active danger" : ""}`} onClick={onDeleteMessages}>{msgDeleteMode ? (selectedMsgs.size ? `确认删除（${selectedMsgs.size}）` : "选择消息") : "⌫ 删除消息"}</button>
+            <button className={`tool-button ${planActive ? "active" : ""}`} onClick={() => startTurn("/plan", false)} disabled={busy}>{planActive ? <><Icon name="check" className="btn-icon" />计划模式</> : <><Icon name="checkSquare" className="btn-icon" />计划模式</>}</button>
+            <button className={`tool-button ${msgDeleteMode ? "active danger" : ""}`} onClick={onDeleteMessages}>{msgDeleteMode ? (selectedMsgs.size ? `确认删除（${selectedMsgs.size}）` : "选择消息") : <><Icon name="trash" className="btn-icon" />删除消息</>}</button>
           </div>
           <form onSubmit={event => { event.preventDefault(); startTurn(message, true); }} className="message-composer">
             <textarea
@@ -182,7 +260,7 @@ function WorkspacePage({
               placeholder={turnState === "paused" ? "输入调整要求，Agent 将在同一任务中继续…" : "描述你希望 Agent 完成的科研任务…"}
               rows={3}
             />
-            <button disabled={!runId || !message.trim() || (busy && turnState !== "paused")} className="send-button"><span>{turnState === "paused" ? "调整并继续" : "发送"}</span><i>➤</i></button>
+            <button disabled={!runId || !message.trim() || (busy && turnState !== "paused")} className="send-button"><span>{turnState === "paused" ? "调整并继续" : "发送"}</span><Icon name="send" size={16} /></button>
           </form>
           <div className={`composer-meta ${turnState === "paused" ? "intervention-meta" : ""}`}><span>{turnState === "paused" ? "当前任务已暂停；下一条消息会调整任务并继续" : "Ctrl + Enter 发送"}</span>{activeTurnId && <span>Turn {activeTurnId.slice(0, 8)}</span>}</div>
         </section>
@@ -323,6 +401,7 @@ export default function App() {
     switch (event.event) {
       case "turn_started": setTurnState("running"); break;
       case "assistant_delta": updateAgent(agent => ({ ...agent, content: (agent.content || "") + (event.text || "") })); break;
+      case "reasoning_delta": updateAgent(agent => ({ ...agent, reasoning: (agent.reasoning || "") + (event.text || "") })); break;
       case "provider_call_finished":
         break;
       case "rate_limited":
@@ -333,7 +412,7 @@ export default function App() {
         setWorkflowSteps(previous => [...previous, { id: `live-${event.sequence}`, skill: event.tool || "工具", status: "running", started_at: event.timestamp }]);
         break;
       case "tool_result":
-        updateAgent(agent => ({ ...agent, steps: [...(agent.steps || []).filter(step => !(step.tool === event.tool && step.status === "running")), { key: event.sequence, tool: event.tool || "工具", status: event.ok === false ? "failed" : "done", summary: event.message || "" }], artifacts: { ...(agent.artifacts || {}), ...(event.artifacts || {}) } }));
+        updateAgent(agent => ({ ...agent, steps: [...(agent.steps || []).filter(step => !(step.tool === event.tool && step.status === "running")), { key: event.sequence, tool: event.tool || "工具", status: outcomeStepStatus(event.outcome, event.ok), summary: event.message || "" }], artifacts: { ...(agent.artifacts || {}), ...(event.artifacts || {}) } }));
         setArtifacts(previous => ({ ...previous, ...(event.artifacts || {}) }));
         setWorkflowSteps(previous => {
           const next = [...previous];
@@ -344,7 +423,7 @@ export default function App() {
               break;
             }
           }
-          const finished = { id: `live-${event.sequence}`, skill: event.tool || "工具", status: event.ok === false ? "failed" : "completed", summary: event.message || "", finished_at: event.timestamp };
+          const finished = { id: `live-${event.sequence}`, skill: event.tool || "工具", status: outcomeStepStatus(event.outcome, event.ok), outcome: event.outcome || "", summary: event.message || "", finished_at: event.timestamp };
           if (index >= 0) next[index] = { ...next[index], ...finished };
           else next.push(finished);
           return next;
@@ -356,18 +435,18 @@ export default function App() {
       case "turn_resumed": setTurnState("running"); break;
       case "approval_required": setTurnState("waiting_approval"); refreshRun(runId).catch(() => {}); break;
       case "turn_finished":
-        updateAgent(agent => ({ ...agent, content: event.assistant_message || agent.content || "", artifacts: event.artifacts || agent.artifacts || {}, streaming: false }));
+        updateAgent(agent => ({ ...agent, content: event.assistant_message || agent.content || "", reasoning: agent.reasoning || "", artifacts: event.artifacts || agent.artifacts || {}, streaming: false }));
         if (event.context_size !== undefined) setContextSize(Math.max(0, Number(event.context_size) || 0));
         setArtifacts(event.artifacts || {}); setPendingApproval(null); setTurnState("completed"); setActiveTurnId("");
         refreshRun(runId, { replaceMessages: false }).catch(() => {}); break;
-      case "turn_failed": updateAgent(agent => ({ ...agent, streaming: false })); setWorkflowSteps(previous => previous.map(step => step.status === "running" ? { ...step, status: "failed" } : step)); setError(event.error || "任务执行失败，但已经完成的成果仍然保留。"); setTurnState("failed"); setActiveTurnId(""); refreshRun(runId, { replaceMessages: false }).catch(() => {}); break;
+      case "turn_failed": updateAgent(agent => ({ ...agent, reasoning: agent.reasoning || "", streaming: false })); setWorkflowSteps(previous => previous.map(step => step.status === "running" ? { ...step, status: "failed" } : step)); setError(event.error || "任务执行失败，但已经完成的成果仍然保留。"); setTurnState("failed"); setActiveTurnId(""); refreshRun(runId, { replaceMessages: false }).catch(() => {}); break;
       case "turn_cancelled":
         updateAgent(agent => {
           const notice = event.message || "任务已停止。已完成的步骤和成果均已保留。";
           const content = (agent.content || "").trim();
-          return { ...agent, content: content.includes(notice) ? content : `${content}${content ? "\n\n" : ""}${notice}`, streaming: false };
+          return { ...agent, content: content.includes(notice) ? content : `${content}${content ? "\n\n" : ""}${notice}`, reasoning: agent.reasoning || "", streaming: false };
         });
-        setWorkflowSteps(previous => previous.map(step => step.status === "running" ? { ...step, status: "cancelled" } : step));
+        setWorkflowSteps(previous => previous.map(step => ["queued", "running"].includes(step.status) ? { ...step, status: "cancelled" } : step));
         setTurnState("cancelled"); setActiveTurnId(""); refreshRun(runId, { replaceMessages: false }).catch(() => {}); break;
       default: break;
     }
@@ -397,7 +476,7 @@ export default function App() {
     const controller = new AbortController();
     abortRef.current = controller; sequenceRef.current = 0; turnIdRef.current = selectedTurnId;
     setActiveTurnId(selectedTurnId); setTurnState(run.active_turn.status || "running");
-    setMessages(previous => [...previous, { role: "agent", content: "", steps: [], artifacts: {}, streaming: true }]);
+    setMessages(previous => [...previous, { role: "agent", content: "", reasoning: "", steps: [], artifacts: {}, streaming: true }]);
     try {
       const response = await fetch(`${API}/runs/${encodeURIComponent(selectedRunId)}/turns/${encodeURIComponent(selectedTurnId)}/events?after=0`, { signal: controller.signal });
       await consume(response, generation);
@@ -450,7 +529,7 @@ export default function App() {
               break;
             }
           }
-          return [...next, { role: "user", content: value }, { role: "agent", content: "", steps: [], artifacts: {}, streaming: true }];
+          return [...next, { role: "user", content: value }, { role: "agent", content: "", reasoning: "", steps: [], artifacts: {}, streaming: true }];
         });
         setMessage(""); setTurnState("running"); scrollDown();
       } catch (eventError) {
@@ -460,7 +539,7 @@ export default function App() {
     }
     const generation = generationRef.current; const controller = new AbortController();
     abortRef.current = controller; sequenceRef.current = 0; setError(""); setTurnState("running"); setPendingApproval(null);
-    setMessages(previous => [...previous, ...(showUser ? [{ role: "user", content: value }] : []), { role: "agent", content: "", steps: [], artifacts: {}, streaming: true }]);
+    setMessages(previous => [...previous, ...(showUser ? [{ role: "user", content: value }] : []), { role: "agent", content: "", reasoning: "", steps: [], artifacts: {}, streaming: true }]);
     if (showUser) setMessage(""); scrollDown();
     try {
       const response = await fetch(`${API}/runs/${encodeURIComponent(runId)}/turns/stream`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: value }), signal: controller.signal });
@@ -521,13 +600,13 @@ export default function App() {
         const response = await fetch(`${API}/runs/${encodeURIComponent(runId)}/reject`, { method: "POST" });
         if (!response.ok) throw new Error((await response.json()).detail || response.statusText);
         const data = await response.json(); applyRun(data);
-        if (data.assistant_message) setMessages(previous => [...previous, { role: "agent", content: data.assistant_message, steps: [], artifacts: data.artifacts || {}, streaming: false }]);
+        if (data.assistant_message) setMessages(previous => [...previous, { role: "agent", content: data.assistant_message, reasoning: "", steps: [], artifacts: data.artifacts || {}, streaming: false }]);
         return;
       }
       const response = await fetch(`${API}/runs/${encodeURIComponent(runId)}/approve`, { method: "POST" });
       if (!response.ok) throw new Error((await response.json()).detail || response.statusText);
       const data = await response.json(); applyRun(data);
-      setMessages(previous => [...previous, { role: "agent", content: data.assistant_message || "操作已完成。", steps: (data.events || []).filter(event => event.event === "tool_observed").map(event => ({ key: event.sequence, tool: event.skill || "", status: "done", summary: (event.summary || "").slice(0, 200) })), artifacts: data.artifacts || {}, streaming: false }]);
+      setMessages(previous => [...previous, { role: "agent", content: data.assistant_message || "操作已完成。", reasoning: "", steps: (data.events || []).filter(event => event.event === "tool_observed").map(event => ({ key: event.sequence, tool: event.skill || "", status: "done", summary: (event.summary || "").slice(0, 200) })), artifacts: data.artifacts || {}, streaming: false }]);
     } catch (eventError) {
       setError(eventError.message); setTurnState("idle");
     } finally {

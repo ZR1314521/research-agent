@@ -1,3 +1,5 @@
-# Document conversion
+# document-convert
 
-Convert between DOCX and Markdown formats. Produces a converted file and a conversion report. Note: reference-format-gbt7714 reads DOCX paragraphs directly without needing conversion. Never claim Markdown preserves Word pagination, comments, or tracked changes.
+Convert DOCX to Markdown or Markdown to DOCX with imported source, media extraction, and a fidelity report.
+
+Handler: document_convert

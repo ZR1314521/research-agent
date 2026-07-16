@@ -1,9 +1,5 @@
----
-name: pubmed-database
-description: Query PubMed and retrieve biomedical article metadata and abstracts. Use for medicine, biology, clinical, neuroscience, and health-related literature searches.
----
+# pubmed-database
 
-# PubMed Database
+Search PubMed only.
 
-Use NCBI E-utilities with configured email and optional key. Fetch abstracts in batches, preserve PMID and DOI, respect rate limits, and never infer biomedical claims from title-only records.
-
+Handler: search_pubmed

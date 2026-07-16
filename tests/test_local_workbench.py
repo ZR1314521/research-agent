@@ -9,7 +9,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from research_agent.app import create_app
+from research_agent.app import _workflow_projection, create_app
 from research_agent.chat import ResearchChatAgent
 from research_agent.config import AgentConfig
 from research_agent.turns import TurnControl
@@ -261,6 +261,20 @@ class LocalWorkbenchApiTests(unittest.TestCase):
         self.assertIn('control("resume")', source)
         self.assertIn("pause_requested", source)
         self.assertIn("rate_limited", source)
+        self.assertIn('["paused", "pause_requested", "rate_limited"]', source)
+
+    def test_workflow_projection_preserves_truthful_tool_outcomes(self) -> None:
+        events = [
+            {"event": "tool_started", "skill": "literature-search-openalex"},
+            {"event": "tool_observed", "skill": "literature-search-openalex", "ok": False, "outcome": "rate_limited", "summary": "OpenAlex 限流"},
+            {"event": "tool_started", "skill": "semanticscholar-skill"},
+            {"event": "cancel_requested", "summary": "user cancelled active turn"},
+        ]
+
+        steps = _workflow_projection(events)
+
+        self.assertEqual(steps[0]["status"], "rate_limited")
+        self.assertEqual(steps[1]["status"], "cancelled")
 
     def test_workbench_exposes_home_settings_and_scheduler_features(self) -> None:
         home = (ROOT / "workbench" / "src" / "pages" / "HomePage.js").read_text(encoding="utf-8")
