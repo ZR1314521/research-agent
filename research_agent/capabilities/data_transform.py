@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import json
-import re
 import time
 from pathlib import Path
 from typing import Any
@@ -27,9 +26,7 @@ class DataTransformService:
         ops = list(arguments.get("ops") or arguments.get("transform_ops") or [])
         keep_columns = [str(item) for item in arguments.get("keep_columns") or []]
         if not ops:
-            ops = self._ops_from_request(str(arguments.get("request") or ""))
-        if not ops:
-            raise ValueError("没有识别到数据转换动作，例如归一化、筛掉缺失值、只保留这些列")
+            raise ValueError("请提供显式 transform_ops；系统不会从自然语言中猜测数据转换动作")
 
         transformed = [dict(row) for row in rows]
         log: list[dict[str, Any]] = []
@@ -39,7 +36,7 @@ class DataTransformService:
             log.append({"operation": "drop_missing", "before": before, "after": len(transformed)})
         if "keep_columns" in ops:
             if not keep_columns:
-                keep_columns = self._keep_columns_from_request(str(arguments.get("request") or ""), columns)
+                raise ValueError("keep_columns 操作需要显式 keep_columns 列表")
             missing = [column for column in keep_columns if column not in columns]
             if missing:
                 raise ValueError(f"这些列不存在：{', '.join(missing)}")
@@ -48,7 +45,10 @@ class DataTransformService:
             log.append({"operation": "keep_columns", "columns": keep_columns})
         for op in ("normalize", "standardize"):
             if op in ops:
-                transformed, details = self._scale(transformed, op)
+                scale_columns = [str(item) for item in arguments.get("scale_columns") or []]
+                if not scale_columns:
+                    raise ValueError(f"{op} 操作需要显式 scale_columns 列表")
+                transformed, details = self._scale(transformed, op, scale_columns)
                 log.append({"operation": op, "columns": details})
 
         output = self._output_path(arguments, source)
@@ -100,9 +100,14 @@ class DataTransformService:
         with path.open(newline="", encoding="utf-8-sig", errors="ignore") as handle:
             return list(csv.DictReader(handle, delimiter=delimiter))
 
-    def _scale(self, rows: list[dict[str, Any]], op: str) -> tuple[list[dict[str, Any]], list[str]]:
+    def _scale(
+        self, rows: list[dict[str, Any]], op: str, requested_columns: list[str]
+    ) -> tuple[list[dict[str, Any]], list[str]]:
         numeric = {}
-        for column in rows[0]:
+        missing = [column for column in requested_columns if column not in rows[0]]
+        if missing:
+            raise ValueError(f"这些缩放列不存在：{', '.join(missing)}")
+        for column in requested_columns:
             values = []
             for row in rows:
                 try:
@@ -110,8 +115,10 @@ class DataTransformService:
                 except (TypeError, ValueError):
                     values = []
                     break
-            if len(values) == len(rows) and len(values) > 1 and not self._id_like(column):
+            if len(values) == len(rows) and len(values) > 1:
                 numeric[column] = values
+            else:
+                raise ValueError(f"缩放列必须全部为数值且至少有两行：{column}")
         result = [dict(row) for row in rows]
         for column, values in numeric.items():
             low, high = min(values), max(values)
@@ -124,9 +131,6 @@ class DataTransformService:
                 else:
                     row[column] = "0" if std == 0 else f"{(value - mean) / std:.10g}"
         return result, list(numeric)
-
-    def _id_like(self, column: str) -> bool:
-        return bool(re.search(r"(^id$|subject|被试|编号|trial|epoch)", column, re.IGNORECASE))
 
     def _write_csv(self, path: Path, rows: list[dict[str, Any]], columns: list[str]) -> None:
         with path.open("w", newline="", encoding="utf-8-sig") as handle:
@@ -152,23 +156,4 @@ class DataTransformService:
             if not candidate.exists():
                 return candidate
         raise RuntimeError(f"Cannot create versioned path for {path}")
-
-    def _ops_from_request(self, request: str) -> list[str]:
-        ops = []
-        if re.search(r"归一化|normalize", request, re.IGNORECASE):
-            ops.append("normalize")
-        if re.search(r"标准化|standardize", request, re.IGNORECASE):
-            ops.append("standardize")
-        if re.search(r"筛掉缺失|删除缺失|drop", request, re.IGNORECASE):
-            ops.append("drop_missing")
-        if re.search(r"只保留|保留这些列|keep", request, re.IGNORECASE):
-            ops.append("keep_columns")
-        return ops
-
-    def _keep_columns_from_request(self, request: str, columns: list[str]) -> list[str]:
-        quoted = re.findall(r"`([^`]+)`|\"([^\"]+)\"|'([^']+)'", request)
-        values = [next(item for item in match if item) for match in quoted if any(match)]
-        if values:
-            return [value for value in values if value in columns]
-        return [column for column in columns if column in request]
 

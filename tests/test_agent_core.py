@@ -5,17 +5,19 @@ import json
 import shutil
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from typing import Any
+from unittest.mock import Mock, patch
 
 from research_agent.config import AgentConfig
 from research_agent.context import ContextManager
 from research_agent.core.agent import AgentLoop
-from research_agent.core.contracts import ContractError, register_artifacts, validate_result_quality
+from research_agent.core.contracts import ContractError, public_artifacts, refresh_artifact_profiles, register_artifacts, validate_result_quality
 from research_agent.core.prompt_runtime import PromptRuntime
 from research_agent.chat import ResearchChatAgent
 from research_agent.capabilities.files import FileService
 from research_agent.capabilities.literature import LiteratureService
 from research_agent.capabilities.references import ReferenceService
+from research_agent.capabilities.rag import RagService
 from research_agent.capabilities.writing import WritingService
 from research_agent.session import ChatSession, SessionStore
 from research_agent.skill_registry import SkillRegistry
@@ -117,6 +119,133 @@ class AgentCoreTests(unittest.TestCase):
         self.assertIn("tool_observed", [event["event"] for event in self.session.events])
         self.assertEqual(self.session.model_messages[-2]["role"], "tool")
 
+    def test_literature_batch_retrieves_all_queries_but_screens_once(self) -> None:
+        service = LiteratureService(self.config, self.sessions.directory(self.session.session_id))
+        client = Mock()
+        client.search.side_effect = lambda query, **_kwargs: [
+            {"title": f"Paper for {query}", "year": 2025, "abstract": "motor imagery EEG method", "venue": "Test"}
+        ]
+        service._client = lambda _source: client
+        service.screen_with_edge = Mock(side_effect=lambda papers, *_args: (papers, [], []))
+
+        result = service.search({
+            "queries": ["EEG MI CNN", "EEG MI Transformer", "EEG MI GNN"],
+            "sources": ["openalex"],
+            "limit": 10,
+            "request": "比较近三年 EEG MI 方法趋势",
+        })
+
+        self.assertEqual(client.search.call_count, 3)
+        self.assertEqual(service.screen_with_edge.call_count, 1)
+        self.assertEqual(result["data"]["count"], 3)
+        self.assertEqual(result["progress"]["metrics"]["deduplicated"], 3)
+        self.assertTrue(result["model_data"]["answer_ready"])
+        self.assertEqual(len(result["model_data"]["papers"]), 3)
+        self.assertLessEqual(
+            ContextManager.estimate_tokens(result["model_data"]["papers"]),
+            int(self.config.context_observation_budget * 0.72),
+        )
+
+    def test_literature_batch_bounds_screening_and_interleaves_queries(self) -> None:
+        service = LiteratureService(self.config, self.sessions.directory(self.session.session_id))
+        client = Mock()
+        client.search.side_effect = lambda query, **_kwargs: [
+            {"title": f"{query} result {rank}", "year": 2025, "abstract": "evidence"}
+            for rank in range(4)
+        ]
+        service._client = lambda _source: client
+        service.screen_with_edge = Mock(side_effect=lambda papers, *_args: (papers, [], []))
+
+        service.search({
+            "queries": ["query one", "query two", "query three"],
+            "sources": ["openalex"],
+            "limit": 3,
+            "request": "compare methods",
+        })
+
+        evaluated = service.screen_with_edge.call_args.args[0]
+        self.assertEqual(len(evaluated), 3)
+        self.assertEqual(
+            [paper["title"] for paper in evaluated],
+            ["query one result 0", "query two result 0", "query three result 0"],
+        )
+
+    def test_literature_batch_applies_configured_query_and_screening_boundaries(self) -> None:
+        object.__setattr__(self.config, "literature_max_batch_queries", 2)
+        object.__setattr__(self.config, "literature_screening_limit", 3)
+        service = LiteratureService(self.config, self.sessions.directory(self.session.session_id))
+        client = Mock()
+        client.search.side_effect = lambda query, **_kwargs: [
+            {"title": f"{query} result {rank}", "year": 2025, "abstract": "evidence"}
+            for rank in range(5)
+        ]
+        service._client = lambda _source: client
+        service.screen_with_edge = Mock(side_effect=lambda papers, *_args: (papers, [], []))
+
+        result = service.search({
+            "queries": ["one", "two", "three", "four"],
+            "sources": ["openalex"],
+            "limit": 50,
+            "request": "compare methods",
+        })
+
+        self.assertEqual(client.search.call_count, 2)
+        self.assertEqual(len(service.screen_with_edge.call_args.args[0]), 3)
+        self.assertEqual(result["progress"]["metrics"]["evaluated"], 3)
+
+    def test_declarative_single_batch_policy_skips_duplicate_tool_calls(self) -> None:
+        loop = AgentLoop(
+            self.config,
+            self.registry,
+            self.sessions,
+            self.sessions.directory(self.session.session_id),
+        )
+        tool_calls = [
+            {
+                "id": f"call-{index}",
+                "type": "function",
+                "function": {
+                    "name": "academic-search-multisource",
+                    "arguments": json.dumps({"query": query}),
+                },
+            }
+            for index, query in enumerate(("first query", "second query"), 1)
+        ]
+        responses = iter([
+            LLMResult(
+                "", "test", "test", True, outcome="native_tool_call",
+                tool_calls=tool_calls,
+                assistant_message={"role": "assistant", "content": None, "tool_calls": tool_calls},
+            ),
+            text_response("我会根据已获得的证据直接回答。"),
+        ])
+        executed: list[str] = []
+        captured: list[list[dict[str, Any]]] = []
+        offered_tools: list[Any] = []
+
+        def chat(_operation, messages, **kwargs):
+            captured.append(json.loads(json.dumps(messages, ensure_ascii=False)))
+            offered_tools.append(kwargs.get("tools"))
+            return next(responses)
+
+        loop.executor.execute = lambda tool, _arguments, _session: (
+            executed.append(tool)
+            or {
+                "message": "找到足够证据。", "artifacts": {},
+                "data": {}, "model_data": {"answer_ready": True},
+            }
+        )
+        with patch.object(loop.client, "chat", side_effect=chat):
+            result = loop.run(self.session, "研究这个问题")
+
+        self.assertEqual(result.message, "我会根据已获得的证据直接回答。")
+        self.assertEqual(executed, ["academic-search-multisource"])
+        tool_payloads = [json.loads(item["content"]) for item in captured[-1] if item.get("role") == "tool"]
+        self.assertEqual(len(tool_payloads), 2)
+        self.assertEqual(tool_payloads[-1]["error_code"], "batch_policy")
+        self.assertTrue(offered_tools[0])
+        self.assertIsNone(offered_tools[1])
+
     def test_large_tool_observation_is_compact_even_when_total_context_has_room(self) -> None:
         manager = ContextManager(
             self.sessions.directory(self.session.session_id),
@@ -136,6 +265,30 @@ class AgentCoreTests(unittest.TestCase):
         self.assertIn("data_ref", observation)
         self.assertLessEqual(manager.estimate_tokens(observation), 4_000)
         self.assertTrue(Path(observation["data_ref"]).exists())
+
+    def test_compact_tool_observation_preserves_generic_answer_readiness(self) -> None:
+        manager = ContextManager(
+            self.sessions.directory(self.session.session_id),
+            context_budget=20_000,
+            observation_budget=700,
+        )
+        observation = manager.observation(
+            tool="generic-research-tool",
+            message="证据已整理。",
+            data={
+                "answer_ready": True,
+                "missing_evidence": [],
+                "completion_guidance": "Answer the user from the supplied evidence.",
+                "records": [{"text": "evidence " * 10_000}],
+            },
+            artifacts={"support": "evidence.json"},
+            messages=[{"role": "user", "content": "分析趋势"}],
+        )
+
+        self.assertTrue(observation["answer_ready"])
+        self.assertEqual(observation["missing_evidence"], [])
+        self.assertIn("completion_guidance", observation)
+        self.assertNotIn("data", observation)
 
     def test_request_budget_includes_fixed_prompt_and_output_reserve(self) -> None:
         manager = ContextManager(
@@ -220,16 +373,18 @@ class AgentCoreTests(unittest.TestCase):
             "doi": "10.1/exploratory",
         }]
 
-        included, excluded, edge = service.screen_with_edge(
-            papers,
-            "EEG MDD Transformer",
-            2020,
-            2026,
-            [],
-            [],
-            [],
-            False,
-        )
+        assessment = {"papers": [{"id": "p0", "decision": "include", "score": 22, "reasons": ["exploratory but relevant"]}]}
+        with patch.object(service.client, "complete", return_value=text_response(json.dumps(assessment))):
+            included, excluded, edge = service.screen_with_edge(
+                papers,
+                "EEG MDD Transformer",
+                2020,
+                2026,
+                [],
+                [],
+                [],
+                False,
+            )
 
         self.assertEqual(len(included), 1)
         self.assertFalse(excluded)
@@ -251,20 +406,170 @@ class AgentCoreTests(unittest.TestCase):
             ],
         }
 
-        included, excluded, edge = service.screen_with_edge(
-            [paper],
-            "EEG MDD Transformer",
-            2020,
-            2026,
-            [],
-            ["EEG", "MDD", "Transformer"],
-            [],
-            True,
-        )
+        assessment = {
+            "papers": [{
+                "id": "p0", "decision": "include", "score": 80,
+                "reasons": ["all concepts supported by supplied keywords"],
+                "matched_requirements": ["EEG", "MDD", "Transformer"],
+                "missing_requirements": [],
+            }]
+        }
+        with patch.object(service.client, "complete", return_value=text_response(json.dumps(assessment))):
+            included, excluded, edge = service.screen_with_edge(
+                [paper],
+                "EEG MDD Transformer",
+                2020,
+                2026,
+                [],
+                ["EEG", "MDD", "Transformer"],
+                [],
+                True,
+            )
 
         self.assertEqual(len(included), 1)
         self.assertFalse(excluded)
         self.assertFalse(edge)
+
+    def test_semantic_screening_requests_compact_per_paper_results(self) -> None:
+        service = LiteratureService(
+            self.config,
+            self.sessions.directory(self.session.session_id),
+        )
+        response = text_response(json.dumps({
+            "included": [{"id": "p0", "score": 81, "reason": "Relevant method and population."}],
+            "edge": [],
+            "excluded_ids": [],
+            "next_query": "",
+            "stop": True,
+            "stop_reason": "sufficient",
+        }))
+        with patch.object(service.client, "complete", return_value=response) as complete:
+            included, _excluded, _edge = service.screen_with_edge(
+                [{"title": "A study", "abstract": "Relevant evidence", "year": 2024}],
+                "a research question",
+                None,
+                None,
+                [],
+                [],
+                [],
+                False,
+            )
+
+        contract = json.loads(complete.call_args.args[1])["output_contract"]
+        self.assertEqual(set(contract) & {"included", "edge", "excluded_ids"}, {"included", "edge", "excluded_ids"})
+        self.assertIn("reason", contract["included"][0])
+        self.assertNotIn("papers", contract)
+        self.assertEqual(included[0]["screening_reasons"], ["Relevant method and population."])
+        self.assertEqual(service.client.config.llm_timeout_seconds, self.config.structured_llm_timeout_seconds)
+        self.assertEqual(service.client.config.llm_max_tokens, self.config.structured_llm_max_tokens)
+        self.assertEqual(service.client.config.llm_retry, self.config.structured_llm_retry)
+
+    def test_literature_semantics_follow_structured_evaluation_not_lexical_rules(self) -> None:
+        service = LiteratureService(self.config, self.sessions.directory(self.session.session_id))
+        papers = [
+            {"title": "Depression EEG cohort", "abstract": "EEG diagnosis in patients with depression.", "year": 2024},
+            {"title": "Depression EEG cohort", "abstract": "EEG study without a depression cohort.", "year": 2024},
+        ]
+        assessment = {
+            "papers": [
+                {"id": "p0", "decision": "include", "score": 94, "reasons": ["target population present"]},
+                {"id": "p1", "decision": "exclude", "score": 5, "reasons": ["negated target population"], "exclusion_reason": "population_not_present"},
+            ],
+            "next_query": "depression EEG diagnostic biomarkers clinical cohort",
+            "stop": False,
+        }
+        with patch.object(service.client, "complete", return_value=text_response(json.dumps(assessment))) as complete:
+            included, excluded, edge = service.screen_with_edge(
+                papers, "depression EEG", 2020, 2026, [], ["depression", "EEG"], [], True
+            )
+
+        self.assertEqual([paper["abstract"] for paper in included], [papers[0]["abstract"]])
+        self.assertEqual(excluded[0]["exclusion_reason"], "population_not_present")
+        self.assertFalse(edge)
+        request = json.loads(complete.call_args.args[1])
+        self.assertEqual(request["required_concepts"], ["depression", "EEG"])
+        self.assertEqual(service._last_next_query, "depression EEG diagnostic biomarkers clinical cohort")
+
+    def test_matrix_extraction_does_not_guess_semantic_fields_when_model_output_is_invalid(self) -> None:
+        service = WritingService(self.config, self.sessions.directory(self.session.session_id))
+        papers = self.tmp / "strict-evidence-papers.json"
+        papers.write_text(json.dumps([{
+            "title": "A proposed transformer for EEG",
+            "abstract": "We propose a transformer and achieve 99% accuracy on a private cohort.",
+            "year": 2024,
+        }]), encoding="utf-8")
+
+        with patch.object(service.client, "complete", return_value=text_response("not valid json")):
+            result = service.summarize_papers(str(papers), {})
+
+        row = result["data"]["rows"][0]
+        self.assertEqual(row["method"], "NOT_REPORTED")
+        self.assertEqual(row["innovation"], "NOT_REPORTED")
+        self.assertEqual(row["key_findings"], "NOT_REPORTED")
+        self.assertEqual(row["extraction_status"], "unavailable")
+
+    def test_matrix_extraction_accepts_only_values_with_verifiable_evidence_quotes(self) -> None:
+        service = WritingService(self.config, self.sessions.directory(self.session.session_id))
+        abstract = "We evaluated a transformer on 120 participants. Accuracy improved by 4%."
+        papers = self.tmp / "quoted-evidence-papers.json"
+        papers.write_text(json.dumps([{"title": "Quoted evidence", "abstract": abstract, "year": 2024}]), encoding="utf-8")
+        extraction = [{
+            "index": 1,
+            "method": {"status": "reported", "value": "transformer", "evidence_quote": "evaluated a transformer"},
+            "dataset": {"status": "reported", "value": "999 participants", "evidence_quote": "999 participants"},
+            "key_findings": {"status": "reported", "value": "Accuracy improved by 4%", "evidence_quote": "Accuracy improved by 4%"},
+        }]
+
+        with patch.object(service.client, "complete", return_value=text_response(json.dumps(extraction))):
+            result = service.summarize_papers(str(papers), {})
+
+        row = result["data"]["rows"][0]
+        self.assertEqual(row["method"], "transformer")
+        self.assertEqual(row["dataset"], "NOT_REPORTED")
+        self.assertEqual(row["key_findings"], "Accuracy improved by 4%")
+        self.assertTrue(result["model_data"]["answer_ready"])
+        self.assertEqual(result["model_data"]["rows"][0]["method"], "transformer")
+        evidence = json.loads(row["evidence_map"])
+        self.assertEqual(evidence["method"]["quote"], "evaluated a transformer")
+        self.assertEqual(evidence["dataset"]["status"], "invalid_evidence")
+
+    def test_reference_enrichment_records_field_level_public_metadata_provenance(self) -> None:
+        source = self.tmp / "incomplete-references.json"
+        source.write_text(json.dumps([{
+            "id": "ref-one", "type": "article-journal", "title": "A verified paper",
+            "authors": [], "year": "", "venue": "", "doi": "10.1234/example",
+        }]), encoding="utf-8")
+        service = ReferenceService(self.config, self.sessions.directory(self.session.session_id))
+        resolved = {
+            "title": "A verified paper", "authors": ["A Author"], "year": "2024",
+            "venue": "Journal of Verified Results", "doi": "10.1234/example",
+            "volume": "12", "issue": "2", "pages": "10-20",
+            "metadata_source": "crossref", "metadata_url": "https://api.crossref.org/works/10.1234/example",
+        }
+        with patch.object(service.metadata_client, "resolve", return_value=resolved):
+            result = service.format({
+                "path": str(source), "styles": ["gbt7714-numeric"],
+                "output_mode": "list", "enrich_metadata": True,
+            }, {})
+
+        manifest = json.loads(Path(result["artifacts"]["reference_metadata_provenance"]).read_text(encoding="utf-8"))
+        self.assertEqual(manifest["records"][0]["fields"]["year"]["source"], "crossref")
+        normalized = json.loads(Path(result["artifacts"]["reference_input_normalized"]).read_text(encoding="utf-8"))
+        self.assertEqual(normalized[0]["venue"], "Journal of Verified Results")
+
+    def test_rag_answer_emits_a_complete_retrieval_manifest(self) -> None:
+        note = self.tmp / "rag-source.txt"
+        note.write_text("Accuracy increased across four experimental epochs.", encoding="utf-8")
+        service = RagService(self.config, self.sessions.directory(self.session.session_id))
+        with patch("research_agent.capabilities.rag.LLMClient.complete", return_value=text_response("Grounded answer.")):
+            result = service.query({"query": "accuracy epochs", "scope": "uploaded"}, {"uploaded_note": str(note)})
+
+        manifest_path = Path(result["artifacts"]["retrieval_manifest"])
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["query"], "accuracy epochs")
+        self.assertEqual(manifest["inputs"], [str(note.resolve())])
+        self.assertTrue(manifest["retrieved_chunks"])
+        self.assertEqual(manifest["retrieved_chunks"][0]["source"], str(note.resolve()))
 
     def test_large_tool_payload_is_not_duplicated_in_session_state(self) -> None:
         loop = AgentLoop(
@@ -333,6 +638,8 @@ class AgentCoreTests(unittest.TestCase):
         prompt = runtime.system(self.session)
         self.assertIn("已有成果", prompt)
         self.assertIn("当前消息优先于旧任务", prompt)
+        self.assertIn("普通说明、时间线、列表和分析不要放进代码块", prompt)
+        self.assertIn("不得把趋势外推到未覆盖范围", prompt)
         self.assertTrue(runtime.tools_for_llm())
 
     def test_dynamic_session_state_does_not_change_system_prompt(self) -> None:
@@ -601,6 +908,11 @@ class AgentCoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ContractError, "missing artifacts"):
             validate_result_quality({"artifacts": {"report": str(self.tmp / "missing.md")}, "data": {}})
 
+    def test_quality_boundary_accepts_a_valid_empty_search_result(self) -> None:
+        pool = self.tmp / "active_papers.json"
+        pool.write_text("[]", encoding="utf-8")
+        validate_result_quality({"artifacts": {"active_papers": str(pool)}, "data": {"count": 0}})
+
     def test_task_plan_is_model_generated_and_revisable(self) -> None:
         loop = AgentLoop(self.config, self.registry, self.sessions, self.sessions.directory(self.session.session_id))
         self.session.status = "planning"
@@ -627,6 +939,37 @@ class AgentCoreTests(unittest.TestCase):
         register_artifacts(self.session, spec, {"latest_document": str(self.tmp / "paper.docx")})
         self.assertEqual(self.session.artifact_records["latest_document"]["type"], "WordDocument")
         self.assertEqual(self.session.artifact_records["latest_document"]["producer"], "file-upload-router")
+
+    def test_artifact_ledger_exposes_only_explicit_user_outputs(self) -> None:
+        spec = self.registry.get("academic-search-multisource")
+        register_artifacts(
+            self.session,
+            spec,
+            {
+                "raw_papers": str(self.tmp / "papers_raw.json"),
+                "paper_pool_markdown": str(self.tmp / "paper_pool.md"),
+            },
+        )
+
+        visible = public_artifacts(self.session.artifact_records)
+
+        self.assertNotIn("raw_papers", visible)
+        self.assertEqual(visible["paper_pool_markdown"]["presentation"], "supporting")
+        self.assertEqual(visible["paper_pool_markdown"]["label"], "筛选后的文献池")
+
+    def test_old_artifact_records_are_upgraded_from_their_producer_contract(self) -> None:
+        self.session.artifacts["paper_pool_markdown"] = str(self.tmp / "paper_pool.md")
+        self.session.artifact_records["paper_pool_markdown"] = {
+            "type": "PaperPool",
+            "path": self.session.artifacts["paper_pool_markdown"],
+            "producer": "literature-search-openalex",
+        }
+
+        changed = refresh_artifact_profiles(self.session, self.registry)
+
+        self.assertTrue(changed)
+        visible = public_artifacts(self.session.artifact_records)
+        self.assertEqual(visible["paper_pool_markdown"]["presentation"], "supporting")
 
     def test_prompt_excludes_large_stale_result_payloads(self) -> None:
         self.session.metadata["last_result"] = {"huge": "x" * 50000}

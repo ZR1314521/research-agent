@@ -61,7 +61,17 @@ class RunStoreIntegrationTests(unittest.TestCase):
 
     def test_failed_close_remains_retryable(self) -> None:
         sessions = SessionStore(self.tmp / "runs")
-        with patch.object(sessions.run_store, "close", side_effect=[RuntimeError("close failed"), None]) as close:
+        real_close = sessions.run_store.close
+        attempts = 0
+
+        def close_after_transient_failure() -> None:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise RuntimeError("close failed")
+            real_close()
+
+        with patch.object(sessions.run_store, "close", side_effect=close_after_transient_failure) as close:
             with self.assertRaisesRegex(RuntimeError, "close failed"):
                 sessions.close()
             sessions.close()

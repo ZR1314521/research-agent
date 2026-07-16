@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -28,10 +29,13 @@ class PromptRuntime:
         bounds without being told what to do."""
         parts = [
             "你运行在一个本地工作台中。你可以调用的工具列在每条消息的 tool list 里。",
+            f"当前本地日期是 {datetime.now().astimezone().date().isoformat()}。遇到‘近三年’等相对时间时，以此日期动态换算，并在回答中写明实际年份范围。",
             "当前消息优先于旧任务。已有成果足以支持当前请求时优先复用；是否复用由你根据当前目标和证据判断，不按预设工具流程推进。",
             "工具执行结果是持久化的——产物文件保存在会话目录下，可以在后续步骤中引用。",
             "当工具返回大量数据时，系统会自动裁剪并保存完整结果到磁盘。模型只收到精简引用，需要时可以再读取。",
             "对话较长时系统会自动压缩较早部分，保留关键信息。这是透明的，你不需要干预。",
+            "工具完成后，应直接给用户一份可读的最终结论：先回答问题，再说明证据与局限，最后按需引用成果。不要把 JSON、内部日志或文件路径列表当作最终答案。",
+            "若工具观察标记 answer_ready=true，说明其中已包含回答当前问题所需的证据；应直接综合回答。只有用户明确要求额外成果，或观察明确指出缺少某个必要字段时，才继续读取内部文件或调用新的产物工具。",
         ]
         return "\n".join(parts)
 
@@ -88,6 +92,8 @@ class PromptRuntime:
             if read_only and tool.get("write_access"):
                 continue
             description = str(tool.get("description") or "")
+            if tool.get("batch_policy") == "single":
+                description += " Submit at most one call to this tool per assistant response; combine related inputs into its array parameters."
             if read_only:
                 description += " (plan mode: confirm with user before calling)"
             schema = tool.get("input_schema", {})

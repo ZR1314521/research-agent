@@ -31,6 +31,19 @@ MATRIX_FIELDS = [
     "relevance_score",
     "source_url",
     "doi",
+    "evidence_map",
+    "extraction_status",
+]
+
+EVIDENCE_FIELDS = [
+    "abstract_summary",
+    "research_question",
+    "method",
+    "dataset",
+    "innovation",
+    "key_findings",
+    "conclusion",
+    "limitations",
 ]
 
 
@@ -47,7 +60,7 @@ class WritingService:
             papers = papers[: max(1, int(arguments["limit"]))]
         if not papers:
             raise ValueError("当前会话没有可总结的论文")
-        fallback_rows = [self._fallback_row(paper, index) for index, paper in enumerate(papers, 1)]
+        unavailable_rows = [self._merge_row(paper, {}, index) for index, paper in enumerate(papers, 1)]
         compact = [
             {
                 "index": index,
@@ -62,9 +75,10 @@ class WritingService:
             for index, paper in enumerate(papers, 1)
         ]
         instruction = (
-            "Return one JSON array. Extract abstract_summary, research_question, method, dataset, innovation, "
-            "key_findings, conclusion, limitations, evidence_scope from supplied abstracts only. "
-            "Use NEEDS_FULLTEXT where absent."
+            "Return one valid JSON array with one item per input index. For every field abstract_summary, "
+            "research_question, method, dataset, innovation, key_findings, conclusion, and limitations, return an "
+            "object {status: reported|not_reported, value: string, evidence_quote: exact substring from that paper's "
+            "abstract}. A reported value without an exact supporting quote is invalid. Do not infer absent facts."
         )
         evidence = self.context.fit_text(
             json.dumps(compact, ensure_ascii=False),
@@ -75,7 +89,7 @@ class WritingService:
         result = self.client.complete(
             "literature_matrix_extraction",
             instruction + "\n" + evidence,
-            fallback=json.dumps(fallback_rows, ensure_ascii=False),
+            fallback=json.dumps([], ensure_ascii=False),
             system="Conservative academic evidence extraction; valid JSON only.",
             temperature=0,
         )
@@ -86,7 +100,7 @@ class WritingService:
                 for index, paper in enumerate(papers)
             ]
         except (ValueError, json.JSONDecodeError):
-            rows = fallback_rows
+            rows = unavailable_rows
         paths = self._write_matrix(rows)
         lines = [f"已整理 {len(rows)} 篇论文："]
         for index, row in enumerate(rows[:8], 1):
@@ -95,14 +109,54 @@ class WritingService:
         if len(rows) > 8:
             lines.append(f"其余 {len(rows) - 8} 篇见文献矩阵。")
         lines.append(f"文献矩阵：{paths['literature_matrix_md']}")
-        return {"message": "\n".join(lines), "artifacts": paths, "data": {"rows": rows}}
+        model_rows = self._matrix_model_rows(rows)
+        return {
+            "message": "\n".join(lines),
+            "artifacts": paths,
+            "data": {"rows": rows},
+            "model_data": {
+                "answer_ready": bool(model_rows),
+                "missing_evidence": [] if model_rows else ["No grounded evidence was extracted."],
+                "row_count": len(rows),
+                "rows": model_rows,
+                "completion_guidance": (
+                    "Use these grounded rows to answer the user's research question now. "
+                    "Do not return the matrix files as the answer."
+                ),
+            },
+            "progress": {
+                "summary": f"文献证据提取完成：整理 {len(rows)} 篇",
+                "metrics": {"extracted": len(rows), "grounded": len(model_rows)},
+            },
+        }
+
+    def _matrix_model_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Keep grounded synthesis evidence inside the configured observation budget."""
+        keys = (
+            "citation_key", "title", "year", "venue", "method", "dataset",
+            "innovation", "key_findings", "conclusion", "limitations",
+            "evidence_scope", "doi", "source_url", "extraction_status",
+        )
+        budget = max(256, int(self.config.context_observation_budget * 0.72))
+        selected: list[dict[str, Any]] = []
+        for row in rows:
+            grounded = any(
+                str(row.get(field) or "").strip() not in {"", "NOT_REPORTED", "NEEDS_FULLTEXT"}
+                for field in EVIDENCE_FIELDS
+            )
+            if not grounded:
+                continue
+            candidate = {key: row.get(key) for key in keys}
+            if ContextManager.estimate_tokens([*selected, candidate]) > budget:
+                break
+            selected.append(candidate)
+        return selected
 
     def summarize_document(self, source: str, arguments: dict[str, Any]) -> dict[str, Any]:
         request = str(arguments.get("request") or "请用中文概述该文档")
-        detail = "详细" if re.search(r"详细|展开|具体|深入", request) else "简洁"
         prompt = (
             f"用户请求：{request}\n"
-            f"请用中文给出{detail}、证据可追溯的说明。只依据以下文档内容，禁止编造未出现的事实、实验结果或局限。"
+            "请按用户要求给出证据可追溯的说明。只依据以下文档内容，禁止编造未出现的事实、实验结果或局限。"
             "分别说明：问题、方法、证据、局限。信息缺失时明确写‘文档未说明’。\n\n文档内容：\n"
             + self.context.fit_text(
                 source,
@@ -236,32 +290,6 @@ class WritingService:
             "data": {},
         }
 
-    def _fallback_row(self, paper: dict[str, Any], index: int) -> dict[str, Any]:
-        abstract = re.sub(r"\s+", " ", str(paper.get("abstract") or "")).strip()
-        method = self._sentence(abstract, r"propos|using|use |method|network|model|cnn|transformer|lstm|classification")
-        dataset = self._sentence(abstract, r"dataset|deap|mahnob|modma|public|cohort|subjects?|patients?")
-        findings = self._sentence(abstract, r"result|achiev|outperform|accuracy|f1|auc|kappa|show|indicat")
-        extracted = {
-            "abstract_summary": abstract[:500] if abstract else "NEEDS_FULLTEXT",
-            "research_question": self._sentence(abstract, r"challenge|objective|aim|problem|address") or "NEEDS_FULLTEXT",
-            "method": method or "NEEDS_FULLTEXT",
-            "dataset": dataset or "NEEDS_FULLTEXT",
-            "innovation": method or "NEEDS_FULLTEXT",
-            "key_findings": findings or "NEEDS_FULLTEXT",
-            "conclusion": findings or "NEEDS_FULLTEXT",
-            "limitations": "NEEDS_FULLTEXT",
-            "evidence_scope": "abstract" if abstract else "metadata_only",
-        }
-        return self._merge_row(paper, extracted, index)
-
-    def _sentence(self, text: str, pattern: str) -> str:
-        if not text:
-            return ""
-        for sentence in re.split(r"(?<=[.!?])\s+", text):
-            if re.search(pattern, sentence, re.IGNORECASE):
-                return sentence[:420]
-        return ""
-
     def _merge_row(self, paper: dict[str, Any], extracted: dict[str, Any], index: int) -> dict[str, Any]:
         authors = paper.get("authors") or []
         first = re.sub(r"\W+", "", str(authors[0]).split()[-1].lower()) if authors else "paper"
@@ -275,10 +303,35 @@ class WritingService:
             "source_url": paper.get("url") or paper.get("open_access_url") or "",
             "doi": paper.get("doi") or "",
         }
+        abstract = str(paper.get("abstract") or "")
+        normalized_abstract = " ".join(abstract.split())
+        evidence_map: dict[str, dict[str, str]] = {}
+        reported = 0
+        for field in EVIDENCE_FIELDS:
+            item = extracted.get(field)
+            if not isinstance(item, dict):
+                row[field] = "NOT_REPORTED"
+                evidence_map[field] = {"status": "not_reported", "quote": ""}
+                continue
+            status = str(item.get("status") or "").strip().lower()
+            value = str(item.get("value") or "").strip()
+            quote = str(item.get("evidence_quote") or "").strip()
+            quote_is_supported = bool(quote and " ".join(quote.split()) in normalized_abstract)
+            if status == "reported" and value and quote_is_supported:
+                row[field] = value
+                evidence_map[field] = {"status": "reported", "quote": quote}
+                reported += 1
+            else:
+                row[field] = "NOT_REPORTED"
+                evidence_map[field] = {
+                    "status": "invalid_evidence" if status == "reported" else "not_reported",
+                    "quote": quote if quote_is_supported else "",
+                }
+        row["evidence_scope"] = "abstract" if reported else ("abstract_unextracted" if abstract else "metadata_only")
+        row["evidence_map"] = json.dumps(evidence_map, ensure_ascii=False, sort_keys=True)
+        row["extraction_status"] = "complete" if reported == len(EVIDENCE_FIELDS) else ("partial" if reported else "unavailable")
         for field in MATRIX_FIELDS:
-            if field not in row:
-                value = extracted.get(field)
-                row[field] = str(value).strip() if value not in (None, "") else "NEEDS_FULLTEXT"
+            row.setdefault(field, "NOT_REPORTED")
         row["index"] = index
         return row
 
@@ -316,36 +369,13 @@ class WritingService:
         }
 
     def _transform_fallback(self, operation: str, request: str, source: str) -> str:
-        if operation == "humanize_text":
-            return self._humanize_local(source)
-        if operation == "write_paper_section":
-            return self._paper_section_local(request, source)
-        return f"模型不可用，已保留原始材料并标记证据边界。\n\n{source[:8000]}"
+        return f"模型不可用，未执行语义改写；以下为保留的原始材料。\n\n{source[:8000]}"
 
     def _document_summary_fallback(self, source: str) -> str:
         text = re.sub(r"\s+", " ", source).strip()
         return (
-            "## 问题\n\n" + (text[:500] or "文档未说明。") +
-            "\n\n## 方法\n\n文档未说明。\n\n## 证据\n\n文档未说明。\n\n## 局限\n\n文档未说明。"
-        )
-
-    def _humanize_local(self, source: str) -> str:
-        text = source.replace("综上所述，", "").replace("值得注意的是，", "")
-        text = re.sub(r"本文旨在深入探讨", "本文讨论", text)
-        text = re.sub(r"具有重要意义", "有研究价值", text)
-        return text.strip() or source
-
-    def _paper_section_local(self, request: str, source: str) -> str:
-        title = "Related Work" if re.search(r"related\s+work|ieee", request, re.IGNORECASE) else "引言"
-        citation_keys = re.findall(r"\|\s*([a-zA-Z][a-zA-Z0-9_-]*(?:20\d{2}|nd))\s*\|", source)
-        citations = ", ".join(dict.fromkeys(citation_keys[:8])) or "待补引用"
-        return (
-            f"# {title}\n\n"
-            "以下草稿仅依据当前会话中的文献矩阵和摘要材料生成；摘要没有支持的结论均保留为待核验。\n\n"
-            "现有研究表明，EEG 相关任务中常见的深度学习方法会围绕时序、空间或频谱表示进行建模。"
-            "在写作时应区分疾病识别、情绪识别、运动想象和 BCI 控制等不同任务，不能把跨任务结果直接当作同一证据链。"
-            f"当前可引用证据包括：{citations}。\n\n"
-            "待补证据：具体数据集规模、实验指标、统计显著性、消融实验和局限性需要阅读全文后确认。"
+            "模型不可用，未执行语义总结。以下为原文摘录，不代表问题、方法或结论抽取：\n\n"
+            + (text[:2000] or "文档为空。")
         )
 
     def _source_text(self, arguments: dict[str, Any], artifacts: dict[str, str]) -> str:

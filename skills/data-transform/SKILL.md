@@ -12,5 +12,5 @@ Rules:
 - Never overwrite the source file unless the user explicitly confirms.
 - Write a transformation log that records source path, output path, operations, and affected columns.
 - Treat outlier deletion and missing-value deletion as separate actions; do not delete outliers automatically.
-- Keep subject IDs, trial IDs, and labels as identifiers unless the user explicitly says otherwise.
-
+- Supply transformations as explicit `ops`; do not ask the executor to infer operations from request text.
+- Supply `keep_columns` for column selection and `scale_columns` for normalization or standardization. Decide roles from the inspected schema, not name-matching rules.

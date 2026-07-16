@@ -149,8 +149,7 @@ class RulePlanner:
     def _default_sources(self, intent: ResearchIntent) -> list[str]:
         if intent.no_network:
             return []
-        biomedical = re.search(r"mdd|depression|medical|clinical|biomedical|neuroscience|医学|临床|抑郁|脑电", intent.query, re.IGNORECASE)
-        return ["openalex", "semantic_scholar", "pubmed" if biomedical else "arxiv"]
+        return ["openalex", "semantic_scholar", "pubmed", "arxiv"]
 
     def _workflow_action(self, intent: ResearchIntent) -> Action | None:
         text = intent.raw
@@ -180,7 +179,7 @@ class RulePlanner:
                 return (
                     "刚才那句太像命令菜单了，不合适。这个终端现在应该是交互式科研智能体："
                     "你可以正常聊天、改条件、追问原因，也可以直接给科研任务。"
-                    "比如“找近三年 CNN EEG MDD 论文，先给候选”，我会拆成检索、筛选、确认、矩阵、综述这些步骤。"
+                    "比如“找近三年某个研究主题的论文，先给候选”，我会拆成检索、筛选、确认、矩阵、综述这些步骤。"
                 )
             return "刚才我没接住你的意思。你可以直接说“不是，我问的是……”我会按上下文改回答，不会默认调用工具。"
         if re.search(r"答非所问|不对|不是|你说的啥|说啥|没问这个|啥意思|没懂|不是这个", stripped, re.IGNORECASE):
@@ -207,7 +206,7 @@ class RulePlanner:
             return (
                 "应该是 chat 类型，而且背后有工作流框架。当前设计是：自然语言输入 -> 意图解析 -> 多步骤计划 -> 工具执行 -> 状态和日志记录。"
                 "如果只是聊天或确认，我会直接回答；如果是科研任务，我会拆成可追踪步骤。"
-                "现在你可以用一句话测试，比如“找近 3 年 CNN EEG MDD 论文，排除综述，先给我候选”。"
+                "现在你可以用一句话测试，比如“找近 3 年某个研究主题的论文，排除综述，先给我候选”。"
             )
         if re.search(r"谢谢|好的|ok|嗯|行|明白", stripped, re.IGNORECASE):
             return "收到。你继续说下一步就行，我会根据上下文判断是追问、改条件，还是执行新的科研步骤。"

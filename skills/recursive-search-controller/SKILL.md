@@ -5,5 +5,4 @@ description: Run bounded query expansion and repeated calls to selected literatu
 
 # Recursive Search Controller
 
-Allow at most three rounds by default. Each round must issue a new source query, deduplicate against prior results, and record query terms and stop reason. Never call rescoring of one unchanged pool recursion.
-
+Use the runtime-configured search boundary. Each round must issue a new source query, deduplicate against prior results, and record query terms and stop reason. Never rescore one unchanged pool recursively.

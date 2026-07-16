@@ -1,4 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  COLOR_FIELDS,
+  DEFAULT_THEME,
+  FONT_OPTIONS,
+  THEME_PRESETS,
+  applyTheme,
+  loadTheme,
+  parseThemeImport,
+  saveTheme,
+} from "../theme";
 
 const SECTIONS = [
   ["quick", "⚙", "快速设置"],
@@ -16,13 +26,6 @@ const PROVIDER_LINKS = {
   moonshot: { site: "https://www.moonshot.cn/", key: "https://platform.moonshot.cn/console/api-keys", docs: "https://platform.moonshot.cn/docs/" },
   zhipu: { site: "https://www.bigmodel.cn/", key: "https://open.bigmodel.cn/usercenter/apikeys", docs: "https://docs.bigmodel.cn/" },
 };
-
-const PALETTES = [
-  { name: "燕麦奶油", note: "温和、低对比", colors: { page: "#f7f2e9", surface: "#fffdf8", soft: "#eef0e6", accent: "#6f7d61", strong: "#536047", text: "#5f5449", muted: "#8b8175", line: "#d9cbbb" } },
-  { name: "鼠尾草", note: "清爽、专注", colors: { page: "#f1f3ec", surface: "#fbfcf7", soft: "#dfe8d7", accent: "#60765b", strong: "#40553e", text: "#3f4a3d", muted: "#768074", line: "#c9d2c3" } },
-  { name: "杏仁陶土", note: "温暖、沉静", colors: { page: "#f7eee6", surface: "#fffaf5", soft: "#f2ded1", accent: "#a56f5e", strong: "#7e4f43", text: "#5d463e", muted: "#8e756b", line: "#dec8bb" } },
-  { name: "雾蓝纸张", note: "理性、轻盈", colors: { page: "#eef3f4", surface: "#fafcfc", soft: "#dce8e9", accent: "#607d82", strong: "#435f64", text: "#405154", muted: "#748488", line: "#c5d3d5" } },
-];
 
 function providerKey(value) {
   const name = String(value || "").toLowerCase();
@@ -62,7 +65,7 @@ function QuickSetup({ api }) {
   const [showKey, setShowKey] = useState(false);
   const [baseUrl, setBaseUrl] = useState("");
   const [model, setModel] = useState("");
-  const [context, setContext] = useState("1000000");
+  const [context, setContext] = useState("");
   const [timeout, setTimeoutValue] = useState("300");
   const [concurrency, setConcurrency] = useState("1");
   const [advanced, setAdvanced] = useState(false);
@@ -73,7 +76,7 @@ function QuickSetup({ api }) {
       setPresets(items);
       const match = items.find(item => providerKey(item.name) === providerKey(health.provider));
       if (match) {
-        setProvider(match.name); setBaseUrl(match.base_url || ""); setModel(health.model || match.model || ""); setContext(String(match.context || 1000000));
+        setProvider(match.name); setBaseUrl(match.base_url || ""); setModel(health.model || match.model || ""); setContext(String(health.context_window || match.context || ""));
       } else if (health.provider || health.model) {
         setProvider(health.provider || "自定义"); setModel(health.model || "");
       }
@@ -84,7 +87,7 @@ function QuickSetup({ api }) {
   const chooseProvider = value => {
     setProvider(value);
     const item = presets.find(preset => preset.name === value);
-    if (item) { setBaseUrl(item.base_url || ""); setModel(item.model || ""); setContext(String(item.context || 1000000)); }
+    if (item) { setBaseUrl(item.base_url || ""); setModel(item.model || ""); setContext(String(item.context || "")); }
     setStatus({ kind: "", text: "" });
   };
   const testConnection = async () => {
@@ -93,7 +96,7 @@ function QuickSetup({ api }) {
     catch (error) { setStatus({ kind: "error", text: `连接失败：${error.message}` }); }
   };
   const save = async () => {
-    if (!provider || !baseUrl || !model || !apiKey) { setStatus({ kind: "error", text: "请完整填写服务商、API Key、Base URL 和模型名称" }); return; }
+    if (!provider || !baseUrl || !model) { setStatus({ kind: "error", text: "请完整填写服务商、Base URL 和模型名称" }); return; }
     setStatus({ kind: "checking", text: "正在保存…" });
     try {
       await apiJson(`${api}/setup/apply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ llm_provider: providerKey(provider) || provider.toLowerCase().split(" ")[0], llm_model: model, llm_base_url: baseUrl, llm_api_key: apiKey, context_window: context, llm_timeout: timeout, max_concurrency: concurrency }) });
@@ -109,14 +112,14 @@ function QuickSetup({ api }) {
       <div className="form-row"><label htmlFor="base-url">Base URL</label><input id="base-url" value={baseUrl} onChange={event => setBaseUrl(event.target.value)} placeholder="https://api.example.com/v1" /></div>
       <div className="form-row"><label htmlFor="model-name">模型名称</label><input id="model-name" value={model} onChange={event => setModel(event.target.value)} placeholder="输入模型标识" /></div>
       <button className="advanced-toggle" onClick={() => setAdvanced(value => !value)}><span>高级选项</span><span>{advanced ? "⌃" : "⌄"}</span></button>
-      {advanced && <div className="advanced-grid"><label>上下文长度<input value={context} onChange={event => setContext(event.target.value)} /></label><label>请求超时（秒）<input value={timeout} onChange={event => setTimeoutValue(event.target.value)} /></label><label>最大并发数<input type="number" min="1" max="10" value={concurrency} onChange={event => setConcurrency(event.target.value)} /></label></div>}
+      {advanced && <div className="advanced-grid"><label>上下文长度<input type="number" min="0" value={context} onChange={event => setContext(event.target.value)} /></label><label>请求超时（秒）<input type="number" min="5" value={timeout} onChange={event => setTimeoutValue(event.target.value)} /></label><label>最大并发数<input type="number" min="1" max="10" value={concurrency} onChange={event => setConcurrency(event.target.value)} /></label></div>}
       <footer className="setup-actions"><span className={`connection-status ${status.kind}`}><i />{status.text || "填写配置后可以检查连接"}</span><div><button className="secondary-action" onClick={testConnection}>测试连接</button><button className="primary-action" onClick={save}>保存并应用</button></div></footer>
     </section>
   </>;
 }
 
 function UsageTrend({ items }) {
-  if (!items.length) return <div className="chart-empty"><span>⌁</span><p>产生模型调用后，这里会显示真实趋势</p></div>;
+  if (!items.length) return <div className="chart-empty"><span>⌁</span><p>完成任务后，这里会显示真实趋势</p></div>;
   const width = 920, height = 260, pad = 26;
   const values = items.map(item => Number(item.input || 0) + Number(item.output || 0));
   const max = Math.max(...values, 1);
@@ -185,27 +188,40 @@ function DataSourcesPanel({ api }) {
   </>;
 }
 
-function applyTheme(colors) {
-  const root = document.documentElement;
-  root.style.setProperty("--page-bg", colors.page);
-  root.style.setProperty("--cream-0", colors.surface);
-  root.style.setProperty("--cream-1", colors.page);
-  root.style.setProperty("--sage-1", colors.soft);
-  root.style.setProperty("--sage-4", colors.accent);
-  root.style.setProperty("--sage-5", colors.strong);
-  root.style.setProperty("--cocoa", colors.text);
-  root.style.setProperty("--muted", colors.muted);
-  root.style.setProperty("--line", colors.line);
-}
-
 function ThemePanel() {
-  const [selected, setSelected] = useState(() => localStorage.getItem("research-agent-palette") || PALETTES[0].name);
-  const [custom, setCustom] = useState(() => { try { return JSON.parse(localStorage.getItem("research-agent-custom-theme")) || PALETTES[0].colors; } catch { return PALETTES[0].colors; } });
-  useEffect(() => { const palette = PALETTES.find(item => item.name === selected); applyTheme(palette?.colors || custom); }, [custom, selected]);
-  const choose = palette => { setSelected(palette.name); localStorage.setItem("research-agent-palette", palette.name); localStorage.setItem("research-agent-theme-colors", JSON.stringify(palette.colors)); applyTheme(palette.colors); };
-  const update = (key, value) => { const next = { ...custom, [key]: value }; setCustom(next); setSelected("custom"); localStorage.setItem("research-agent-palette", "custom"); localStorage.setItem("research-agent-custom-theme", JSON.stringify(next)); localStorage.setItem("research-agent-theme-colors", JSON.stringify(next)); };
-  const reset = () => { setCustom(PALETTES[0].colors); choose(PALETTES[0]); localStorage.removeItem("research-agent-custom-theme"); };
-  return <><SectionHeading title="色彩设计" text="选择让你长时间工作也感到舒服的色彩盘" actions={<button className="secondary-action compact-action" onClick={reset}>恢复默认</button>} /><div className="palette-grid">{PALETTES.map(palette => <button className={`palette-card ${selected === palette.name ? "active" : ""}`} key={palette.name} onClick={() => choose(palette)}><span className="palette-preview">{Object.values(palette.colors).slice(0, 5).map(color => <i key={color} style={{ background: color }} />)}</span><strong>{palette.name}</strong><small>{palette.note}</small></button>)}</div><section className="custom-theme-card"><header><div><h2>自定义色彩盘</h2><p>修改后立即作用于整个工作台</p></div>{selected === "custom" && <span>正在使用</span>}</header><div className="color-fields">{[["page", "页面背景"], ["surface", "卡片背景"], ["soft", "柔和底色"], ["accent", "强调色"], ["text", "主要文字"], ["line", "边框颜色"]].map(([key, label]) => <label key={key}><span>{label}</span><input type="color" value={custom[key]} onChange={event => update(key, event.target.value)} /><code>{custom[key]}</code></label>)}</div></section></>;
+  const [theme, setTheme] = useState(() => loadTheme());
+  const [selected, setSelected] = useState(() => THEME_PRESETS.some(item => item.name === loadTheme().name) ? loadTheme().name : "custom");
+  const [status, setStatus] = useState({ kind: "", text: "" });
+  const importRef = useRef(null);
+  const commit = (next, selection = "custom") => {
+    const saved = saveTheme({ ...next, name: selection === "custom" ? "自定义主题" : selection });
+    applyTheme(saved); setTheme(saved); setSelected(selection); setStatus({ kind: "success", text: "外观已保存并应用到整个工作台" });
+  };
+  const choose = item => commit(item.theme, item.name);
+  const update = (section, key, value) => commit({ ...theme, [section]: { ...theme[section], [key]: value } });
+  const reset = () => commit(DEFAULT_THEME, DEFAULT_THEME.name);
+  const exportTheme = () => {
+    const blob = new Blob([JSON.stringify(theme, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob); const anchor = document.createElement("a");
+    anchor.href = url; anchor.download = "research-agent-theme.json"; anchor.click(); URL.revokeObjectURL(url);
+  };
+  const importTheme = async event => {
+    const file = event.target.files?.[0]; if (!file) return;
+    try { commit(parseThemeImport(await file.text())); setStatus({ kind: "success", text: "主题文件已验证并应用" }); }
+    catch (error) { setStatus({ kind: "error", text: `导入失败：${error.message}` }); }
+    event.target.value = "";
+  };
+  return <>
+    <SectionHeading title="界面主题工作室" text="颜色、字体、布局和动效都由同一份主题配置控制" actions={<div className="theme-heading-actions"><button className="secondary-action compact-action" onClick={exportTheme}>导出 JSON</button><button className="secondary-action compact-action" onClick={() => importRef.current?.click()}>导入 JSON</button><button className="secondary-action compact-action" onClick={reset}>恢复默认</button><input ref={importRef} type="file" accept="application/json,.json" onChange={importTheme} hidden /></div>} />
+    {status.text && <div className={`settings-alert ${status.kind}`}>{status.text}</div>}
+    <div className="palette-grid">{THEME_PRESETS.map(item => <button className={`palette-card ${selected === item.name ? "active" : ""}`} key={item.name} onClick={() => choose(item)}><span className="palette-preview">{Object.values(item.theme.colors).slice(0, 5).map((color, index) => <i key={`${color}-${index}`} style={{ background: color }} />)}</span><strong>{item.name}</strong><small>{item.note}</small></button>)}</div>
+    <section className="custom-theme-card"><header><div><h2>全局颜色</h2><p>修改后立即覆盖所有页面、卡片、图表和状态</p></div>{selected === "custom" && <span>正在使用自定义主题</span>}</header><div className="color-fields">{COLOR_FIELDS.map(([key, label]) => <label key={key}><span>{label}</span><input aria-label={label} type="color" value={theme.colors[key]} onChange={event => update("colors", key, event.target.value)} /><code>{theme.colors[key]}</code></label>)}</div></section>
+    <div className="theme-studio-grid">
+      <section className="theme-control-card"><header><h2>字体与比例</h2><p>标题保留 Sci Agent 的编辑部气质，正文优先保证可读性。</p></header><label>标题字体<select value={theme.typography.display} onChange={event => update("typography", "display", event.target.value)}>{FONT_OPTIONS.display.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label><label>正文字体<select value={theme.typography.body} onChange={event => update("typography", "body", event.target.value)}>{FONT_OPTIONS.body.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label><label>字号比例 <output>{theme.typography.scale.toFixed(2)}×</output><input type="range" min="0.85" max="1.25" step="0.05" value={theme.typography.scale} onChange={event => update("typography", "scale", Number(event.target.value))} /></label></section>
+      <section className="theme-control-card"><header><h2>圆角与布局</h2><p>控制内容宽度、侧栏和整体紧凑程度。</p></header><label>内容最大宽度 <output>{theme.layout.contentWidth}px</output><input type="range" min="960" max="1680" step="40" value={theme.layout.contentWidth} onChange={event => update("layout", "contentWidth", Number(event.target.value))} /></label><label>侧栏宽度 <output>{theme.layout.sidebarWidth}px</output><input type="range" min="220" max="380" step="10" value={theme.layout.sidebarWidth} onChange={event => update("layout", "sidebarWidth", Number(event.target.value))} /></label><label>卡片圆角 <output>{theme.shape.cardRadius}px</output><input type="range" min="0" max="36" value={theme.shape.cardRadius} onChange={event => update("shape", "cardRadius", Number(event.target.value))} /></label><label>控件圆角 <output>{theme.shape.controlRadius}px</output><input type="range" min="0" max="24" value={theme.shape.controlRadius} onChange={event => update("shape", "controlRadius", Number(event.target.value))} /></label><label>面板圆角 <output>{theme.shape.panelRadius}px</output><input type="range" min="0" max="44" value={theme.shape.panelRadius} onChange={event => update("shape", "panelRadius", Number(event.target.value))} /></label><label>界面密度<select value={theme.layout.density} onChange={event => update("layout", "density", event.target.value)}><option value="compact">紧凑</option><option value="comfortable">舒适</option><option value="relaxed">宽松</option></select></label></section>
+      <section className="theme-control-card"><header><h2>背景与动效</h2><p>不再使用固定的大圆光，所有效果均可关闭。</p></header><label>页面背景<select value={theme.effects.background} onChange={event => update("effects", "background", event.target.value)}><option value="solid">纯色</option><option value="grain">细颗粒</option><option value="gradient">柔和渐变</option></select></label><label>阴影强度<select value={theme.effects.shadow} onChange={event => update("effects", "shadow", event.target.value)}><option value="none">无阴影</option><option value="soft">柔和</option><option value="defined">清晰</option></select></label><label className="theme-check"><input type="checkbox" checked={theme.navigation.autoHide} onChange={event => update("navigation", "autoHide", event.target.checked)} /><span><strong>滚动时自动隐藏顶栏</strong><small>向下隐藏，向上立即出现</small></span></label><label className="theme-check"><input type="checkbox" checked={theme.navigation.motion} onChange={event => update("navigation", "motion", event.target.checked)} /><span><strong>界面过渡动画</strong><small>系统开启减少动态效果时仍会自动停用</small></span></label></section>
+    </div>
+  </>;
 }
 
 function Toggle({ checked, onChange, label, text, disabled = false }) {

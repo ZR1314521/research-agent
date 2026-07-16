@@ -45,6 +45,22 @@ class RuntimeHardeningTests(unittest.TestCase):
         self.assertEqual(config.llm_max_tokens, 0)
         self.assertFalse(hasattr(__import__("research_agent.tools.llm_client", fromlist=["OPERATION_BUDGETS"]), "OPERATION_BUDGETS"))
 
+    def test_structured_model_safety_envelope_is_configurable(self) -> None:
+        (self.tmp / ".env").write_text(
+            "RESEARCH_AGENT_STRUCTURED_LLM_TIMEOUT=73\n"
+            "RESEARCH_AGENT_STRUCTURED_LLM_MAX_TOKENS=2048\n"
+            "RESEARCH_AGENT_STRUCTURED_LLM_RETRY=2\n"
+            "RESEARCH_AGENT_LITERATURE_MAX_BATCH_QUERIES=3\n"
+            "RESEARCH_AGENT_LITERATURE_SCREENING_LIMIT=17\n",
+            encoding="utf-8",
+        )
+        config = AgentConfig.load(self.tmp)
+        self.assertEqual(config.structured_llm_timeout_seconds, 73)
+        self.assertEqual(config.structured_llm_max_tokens, 2048)
+        self.assertEqual(config.structured_llm_retry, 2)
+        self.assertEqual(config.literature_max_batch_queries, 3)
+        self.assertEqual(config.literature_screening_limit, 17)
+
     def test_pre_cancelled_model_call_never_touches_network(self) -> None:
         event = Event()
         event.set()

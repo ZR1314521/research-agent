@@ -11,7 +11,7 @@ import unittest
 
 from research_agent.config import AgentConfig
 from research_agent.logging import ModelCallLogger
-from research_agent.provider_runtime import ProviderEvent, call_context
+from research_agent.provider_runtime import ProviderEvent, call_context, provider_event_sink
 from research_agent.tools.llm_client import ModelGateway
 from research_agent.turns import ActiveTurnError, TurnControl, TurnCoordinator
 
@@ -72,6 +72,37 @@ class ProviderStreamTests(unittest.TestCase):
         ledger = (run_dir / "provider_calls.jsonl").read_text(encoding="utf-8")
         self.assertIn('"turn_id": "turn-one"', ledger)
 
+    def test_inherited_turn_sink_keeps_internal_model_content_out_of_user_stream(self) -> None:
+        run_dir = ROOT / ".test_runtime" / "turn_stream" / "internal-visibility"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        config = replace(
+            AgentConfig.load(ROOT),
+            llm_provider="compatible-test", llm_protocol="openai-compatible",
+            llm_model="test-model", llm_base_url="https://example.invalid/v1",
+            llm_api_key="key", llm_max_tokens=0, llm_retry=0,
+        )
+        chunks = [
+            {"choices": [{"delta": {"reasoning_content": "internal reasoning"}, "finish_reason": None}]},
+            {"choices": [{"delta": {"content": '{"papers":['}, "finish_reason": None}]},
+            {"choices": [{"delta": {"content": "]}"}, "finish_reason": "stop"}]},
+            {"choices": [], "usage": {"total_tokens": 12}},
+        ]
+        events: list[ProviderEvent] = []
+
+        def fake_urlopen(_request, timeout):
+            self.assertGreater(timeout, 0)
+            return FakeStreamResponse(chunks)
+
+        gateway = ModelGateway(config, ModelCallLogger(run_dir))
+        with provider_event_sink(events.append), patch(
+            "research_agent.tools.llm_client.urllib.request.urlopen", side_effect=fake_urlopen
+        ):
+            result = gateway.complete("literature_semantic_screening", "screen these papers")
+
+        self.assertEqual(result.text, '{"papers":[]}')
+        self.assertTrue(any(event.kind == "provider_call_started" for event in events))
+        self.assertTrue(any(event.kind == "provider_call_finished" for event in events))
+        self.assertFalse(any(event.kind in {"assistant_delta", "reasoning_delta", "tool_call_delta"} for event in events))
 
 class FakeSessions:
     def __init__(self, root: Path):
@@ -94,6 +125,7 @@ class FakeSessions:
 class BlockingAgent:
     def __init__(self, root: Path):
         self.sessions = FakeSessions(root)
+        self.config = AgentConfig.load(ROOT)
         self.started = threading.Event()
 
     def handle(self, session, _message, cancel_event=None, **_kwargs):

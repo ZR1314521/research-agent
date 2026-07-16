@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from research_agent.config import AgentConfig
+from research_agent.tools.crossref import CrossrefClient
 
 
 class ReferenceService:
@@ -19,6 +20,7 @@ class ReferenceService:
     def __init__(self, config: AgentConfig, session_dir: Path):
         self.config = config
         self.session_dir = session_dir
+        self.metadata_client = CrossrefClient(config)
 
     def format(self, arguments: dict[str, Any], artifacts: dict[str, str]) -> dict[str, Any]:
         raw_path = str(arguments.get("path") or artifacts.get("latest_references") or artifacts.get("active_papers") or artifacts.get("latest_document") or "").strip()
@@ -29,6 +31,10 @@ class ReferenceService:
             raise FileNotFoundError(f"Reference input not found: {source}")
 
         normalized, refs, reference_index = self._normalize_input(source)
+        refs, provenance = self._enrich_metadata(refs, bool(arguments.get("enrich_metadata")))
+        normalized.write_text(json.dumps(refs, ensure_ascii=False, indent=2), encoding="utf-8")
+        provenance_path = self.session_dir / "reference_metadata_provenance.json"
+        provenance_path.write_text(json.dumps(provenance, ensure_ascii=False, indent=2), encoding="utf-8")
         quality_report = self._quality_gate(source, refs, reference_index)
         profiles_path = self.config.rules_dir / "style_profiles.json"
         profiles = json.loads(profiles_path.read_text(encoding="utf-8"))
@@ -55,6 +61,7 @@ class ReferenceService:
             "reference_quality_report": str(quality_report),
             "citation_check_report": str(self.session_dir / "citation_check_report.md"),
             "references_bib": str(self.session_dir / "references.bib"),
+            "reference_metadata_provenance": str(provenance_path),
         }
         for style in styles:
             outputs[f"references_{style}"] = str(self.session_dir / f"references_{style.replace('-', '_')}.md")
@@ -63,7 +70,12 @@ class ReferenceService:
         if style_markdown and "NEEDS_CHECK" in Path(style_markdown).read_text(encoding="utf-8", errors="ignore"):
             raise RuntimeError(f"Reference quality gate failed after formatting. Report: {quality_report}")
 
-        data: dict[str, Any] = {"styles": styles, "reference_count": len(refs), "unresolved_count": 0}
+        data: dict[str, Any] = {
+            "styles": styles,
+            "reference_count": len(refs),
+            "unresolved_count": 0,
+            "metadata_enriched_records": sum(bool(item.get("enriched")) for item in provenance["records"]),
+        }
         if source.suffix.lower() == ".docx" and style_markdown and str(arguments.get("output_mode") or "document") != "list":
             target, audit_path, source_hash = self._write_nature_document(
                 source, refs, reference_index, Path(style_markdown), arguments, document_style
@@ -79,7 +91,60 @@ class ReferenceService:
             lines.append(f"格式化文档: {outputs['formatted_document']}")
         if outputs.get("citation_audit") and data.get("unresolved_count"):
             lines.append(f"注意: {data['unresolved_count']} 条文中引用未能匹配，详见 {outputs['citation_audit']}")
-        return {"message": "\n".join(lines), "artifacts": outputs, "data": data}
+        return {
+            "message": "\n".join(lines),
+            "artifacts": outputs,
+            "data": data,
+            "progress": {
+                "summary": f"参考文献处理完成：{len(refs)} 条，输出 {len(styles)} 种格式",
+                "metrics": {
+                    "references": len(refs),
+                    "styles": len(styles),
+                    "enriched": data["metadata_enriched_records"],
+                    "unresolved": data["unresolved_count"],
+                },
+            },
+        }
+
+    def _enrich_metadata(
+        self, refs: list[dict[str, Any]], enabled: bool
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        bibliographic_fields = ("title", "authors", "year", "venue", "volume", "issue", "pages", "publisher", "doi", "url")
+        enriched_refs: list[dict[str, Any]] = []
+        records: list[dict[str, Any]] = []
+        for index, raw in enumerate(refs, 1):
+            reference = dict(raw)
+            fields = {
+                field: {"source": "input" if reference.get(field) else "missing", "value": reference.get(field) or ""}
+                for field in bibliographic_fields
+            }
+            remote: dict[str, Any] | None = None
+            error = ""
+            if enabled and reference.get("doi"):
+                try:
+                    remote = self.metadata_client.resolve(reference)
+                except Exception as exc:
+                    error = f"{type(exc).__name__}: {exc}"
+            changed = False
+            if remote:
+                source_name = str(remote.get("metadata_source") or "public_metadata")
+                for field in bibliographic_fields:
+                    if not reference.get(field) and remote.get(field):
+                        reference[field] = remote[field]
+                        fields[field] = {"source": source_name, "value": remote[field]}
+                        changed = True
+            enriched_refs.append(reference)
+            records.append({
+                "index": index,
+                "id": reference.get("id") or "",
+                "doi": reference.get("doi") or "",
+                "enriched": changed,
+                "match_basis": (remote or {}).get("match_basis") or "",
+                "metadata_url": (remote or {}).get("metadata_url") or "",
+                "error": error,
+                "fields": fields,
+            })
+        return enriched_refs, {"requested": enabled, "records": records}
 
     def _normalize_input(self, source: Path) -> tuple[Path, list[dict[str, Any]], int | None]:
         suffix = source.suffix.lower()

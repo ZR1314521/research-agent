@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from research_agent.capabilities.charting import ChartService
+from research_agent.capabilities.data_analysis import ExperimentAnalysisService
 from research_agent.config import AgentConfig
 from research_agent.core.agent import AgentLoop
 from research_agent.session import SessionStore
@@ -91,6 +92,50 @@ class ChartServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(result["data"]["chart_type"], "line")
+
+
+class SchemaFirstAnalysisTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = ROOT / ".test_runs" / self.id().replace(".", "_")
+        shutil.rmtree(self.tmp, ignore_errors=True)
+        self.tmp.mkdir(parents=True)
+        self.source = self.tmp / "schema-first.csv"
+        self.source.write_text(
+            "subject_score,condition,step,accuracy\n101,A,1,0.71\n102,A,2,0.76\n103,B,3,0.82\n104,B,4,0.88\n",
+            encoding="utf-8",
+        )
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_column_names_do_not_secretly_decide_identifier_roles(self) -> None:
+        result = ExperimentAnalysisService(self.tmp).analyze({"path": str(self.source)})
+
+        self.assertIn("subject_score", result["data"]["numeric_summary"])
+        self.assertEqual(result["data"]["column_roles"]["identifiers"], [])
+        self.assertEqual(result["data"]["trends"], {})
+
+    def test_explicit_roles_and_chart_specs_drive_analysis_and_real_artifacts(self) -> None:
+        result = ExperimentAnalysisService(self.tmp).analyze({
+            "path": str(self.source),
+            "column_roles": {
+                "identifiers": ["subject_score"], "order": ["step"],
+                "groups": ["condition"], "measures": ["accuracy"],
+            },
+            "trend_specs": [{"x": "step", "y": ["accuracy"]}],
+            "group_specs": [{"group": "condition", "measures": ["accuracy"]}],
+            "chart_specs": [{
+                "chart_type": "line", "x": "step", "y": ["accuracy"],
+                "group": "condition", "title": "Accuracy by step", "output_format": "png",
+            }],
+        })
+
+        self.assertNotIn("subject_score", result["data"]["numeric_summary"])
+        self.assertIn("accuracy", result["data"]["trends"])
+        self.assertEqual(result["data"]["group_comparisons"][0]["group_column"], "condition")
+        chart_paths = [Path(path) for name, path in result["artifacts"].items() if name.startswith("chart_")]
+        self.assertEqual(len(chart_paths), 1)
+        self.assertTrue(chart_paths[0].exists())
 
 
 class InterventionControlTests(unittest.TestCase):

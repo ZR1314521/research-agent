@@ -121,10 +121,16 @@ class ContextManager:
         model_observation = {**full, "data_ref": str(path)}
         if self.estimate_tokens(model_observation) <= allowance:
             return model_observation
+        delivery = {
+            key: data[key]
+            for key in ("answer_ready", "missing_evidence", "completion_guidance")
+            if isinstance(data, dict) and key in data
+        }
         compact: dict[str, Any] = {
             "ok": True, "tool": tool, "message": message,
             "artifacts": artifacts, "data_ref": str(path),
             "note": "The complete tool observation is stored locally and can be read on demand.",
+            **delivery,
         }
         if self.estimate_tokens(compact) > allowance:
             compact["message"] = "Tool completed; read data_ref for the complete result."
@@ -137,6 +143,7 @@ class ContextManager:
                 "tool": tool,
                 "data_ref": str(path),
                 "note": "Complete tool observation stored locally.",
+                **delivery,
             }
         return compact
 

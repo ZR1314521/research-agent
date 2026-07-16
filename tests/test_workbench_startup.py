@@ -19,7 +19,7 @@ class WorkbenchStartupTests(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("-m uvicorn research_agent.app:app --host 127.0.0.1 --port 8877", result.stdout)
+        self.assertIn("-m uvicorn research_agent.app:app --host 127.0.0.1 --port 8878", result.stdout)
         self.assertIn("--prefix", result.stdout)
         self.assertIn("workbench start", result.stdout)
         self.assertIn(str(ROOT / ".venv" / "Scripts" / "python.exe"), result.stdout)

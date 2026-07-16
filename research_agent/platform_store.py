@@ -7,6 +7,7 @@ import os
 import sqlite3
 import threading
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -170,12 +171,17 @@ class PlatformStore:
         self.protector = CredentialProtector()
         self._initialize()
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self):
         connection = sqlite3.connect(self.path, timeout=15)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA busy_timeout = 15000")
-        return connection
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys = ON")
+            connection.execute("PRAGMA busy_timeout = 15000")
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def _initialize(self) -> None:
         with self._lock, self._connect() as db:

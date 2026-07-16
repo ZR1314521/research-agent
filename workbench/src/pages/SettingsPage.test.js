@@ -46,7 +46,11 @@ test("researcher can switch away from an async settings panel without a runtime 
 
   await clickSection("用量统计");
   await clickSection("色彩设计");
-  expect(container.textContent).toContain("自定义色彩盘");
+  expect(container.textContent).toContain("界面主题工作室");
+  expect(container.textContent).toContain("全局颜色");
+  expect(container.textContent).toContain("字体与比例");
+  expect(container.textContent).toContain("圆角与布局");
+  expect(container.textContent).toContain("背景与动效");
 
   await act(async () => root.unmount());
   container.remove();
@@ -73,6 +77,34 @@ test("usage view explains missing model prices without presenting a fake amount"
 
   expect(container.textContent).toContain("费用暂未估算");
   expect(container.textContent).toContain("未配置模型单价");
+
+  await act(async () => root.unmount());
+});
+
+test("theme controls apply presets and background options to the whole document", async () => {
+  localStorage.clear();
+  global.fetch = jest.fn(async url => ({ ok: true, json: async () => responseFor(String(url)) }));
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  await act(async () => { root.render(<SettingsPage api="http://local.test" />); await Promise.resolve(); });
+
+  const themeSection = [...container.querySelectorAll(".settings-nav button")]
+    .find(item => item.textContent.includes("色彩设计"));
+  await act(async () => themeSection.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+
+  const bluePreset = [...container.querySelectorAll(".palette-card")]
+    .find(item => item.textContent.includes("雾蓝纸张"));
+  await act(async () => bluePreset.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+  expect(document.documentElement.style.getPropertyValue("--theme-page")).toBe("#ebf1f2");
+
+  const background = [...container.querySelectorAll(".theme-control-card select")]
+    .find(item => [...item.options].some(option => option.value === "gradient"));
+  await act(async () => {
+    background.value = "solid";
+    background.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(document.documentElement.dataset.background).toBe("solid");
+  expect(JSON.parse(localStorage.getItem("research-agent-theme")).effects.background).toBe("solid");
 
   await act(async () => root.unmount());
 });

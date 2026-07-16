@@ -67,9 +67,12 @@ RESEARCH_AGENT_LLM_MAX_TOKENS=0
 RESEARCH_AGENT_CONTEXT_WINDOW=0
 ```
 
-`MAX_TOKENS=0` omits a local output cap. `CONTEXT_WINDOW=0` avoids guessing a
-provider window. Without a configured model, the chat reports that clearly; it
-does not use keyword rules to pretend it understood the request.
+`MAX_TOKENS=0` omits a fixed per-call output cap and `CONTEXT_WINDOW=0` avoids
+guessing a provider window. The workbench does not expose synthetic call or
+token quotas. Runtime efficiency comes from bounded context, merged tool
+batches, and one screening pass per literature batch. Without a configured
+model, the chat reports that clearly; it does not use keyword rules to pretend
+it understood the request.
 
 ## HTTP chat endpoints
 

@@ -42,10 +42,12 @@ class QualityAuditService:
         )
 
         lines = ["# 质量追责", ""]
+        lines.append("## 请求次数")
         if source_counts:
-            lines.append("## 请求次数")
             lines.extend(f"- {source}: {count}" for source, count in sorted(source_counts.items()))
-            lines.append("")
+        else:
+            lines.append("- 暂无已记录的外部请求")
+        lines.append("")
         lines.extend(
             [
                 "## 文献数量",
@@ -97,4 +99,3 @@ class QualityAuditService:
             except json.JSONDecodeError:
                 continue
         return rows
-

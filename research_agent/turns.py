@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator
 
+from research_agent.core.contracts import public_artifacts
 from research_agent.provider_runtime import ProviderEvent, call_context, provider_event_sink
 
 
@@ -154,7 +155,9 @@ class TurnControl:
             self._pause_requested = False
             self._intervention = None
             self.state = "cancelled"
-            self.emit("turn_cancelled")
+            self.emit("turn_cancelled", {
+                "message": "任务已停止。已完成的步骤和成果均已保留，你可以在当前会话继续追问或生成阶段性结论。",
+            })
             self._condition.notify_all()
             return self.state
 
@@ -218,7 +221,9 @@ class TurnCoordinator:
         control.emit("turn_started")
         try:
             session = self.agent.sessions.load(control.run_id)
-            with call_context(turn_id=control.turn_id, operation="agent_turn"), provider_event_sink(control.emit):
+            with call_context(turn_id=control.turn_id, operation="agent_turn"), provider_event_sink(
+                control.emit
+            ):
                 response = self.agent.handle(
                     session,
                     message,
@@ -258,7 +263,7 @@ class TurnCoordinator:
                 "assistant_message": response.message,
                 "skill": response.skill,
                 "status": response.session.status,
-                "artifacts": response.session.artifact_records,
+                "artifacts": public_artifacts(response.session.artifact_records),
                 "pending_action": response.session.pending_action,
                 "context_size": context_size,
             }

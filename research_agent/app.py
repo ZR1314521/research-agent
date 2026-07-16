@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -9,7 +10,7 @@ import urllib.request
 
 from research_agent.chat import ResearchChatAgent
 from research_agent.config import _load_dotenv
-from research_agent.core.contracts import register_artifacts
+from research_agent.core.contracts import public_artifacts, refresh_artifact_profiles, register_artifacts
 from research_agent.executor import ToolExecutor
 from research_agent.version import RUNTIME_VERSION
 from research_agent.provider_runtime import CallLedger
@@ -47,6 +48,7 @@ def create_app(agent: ResearchChatAgent | None = None) -> Any:
     """Create the localhost-only workbench API without optional multipart/http clients."""
     if FastAPI is None:
         raise RuntimeError("FastAPI is not installed. Install fastapi and uvicorn to run the HTTP API.")
+    owns_agent = agent is None
     agent = agent or ResearchChatAgent()
     coordinator = TurnCoordinator(agent)
     platform_store = PlatformStore(agent.config.runs_dir)
@@ -60,9 +62,12 @@ def create_app(agent: ResearchChatAgent | None = None) -> Any:
             yield
         finally:
             schedule_service.stop()
+            if owns_agent:
+                agent.close()
 
     app = FastAPI(title="AI Research Agent", version=RUNTIME_VERSION, lifespan=lifespan)
     app.state.platform_store = platform_store
+    app.state.agent = agent
     app.state.usage_service = usage_service
     app.state.schedule_service = schedule_service
     app.state.turn_coordinator = coordinator
@@ -76,7 +81,10 @@ def create_app(agent: ResearchChatAgent | None = None) -> Any:
 
     def load_run(run_id: str):
         try:
-            return agent.sessions.load(run_id)
+            session = agent.sessions.load(run_id)
+            if refresh_artifact_profiles(session, agent.registry):
+                agent.sessions.save(session)
+            return session
         except (FileNotFoundError, ValueError) as error:
             raise HTTPException(status_code=404, detail="Run not found") from error
 
@@ -114,19 +122,37 @@ def create_app(agent: ResearchChatAgent | None = None) -> Any:
             val = str(body.get(key, "")).strip()
             if val:
                 updates[key] = val
-        if not updates:
+        numeric_fields = {
+            "context_window": (0, None),
+            "llm_timeout": (5, None),
+            "max_concurrency": (1, 10),
+        }
+        numeric_values: dict[str, str] = {}
+        for key, (minimum, maximum) in numeric_fields.items():
+            raw = str(body.get(key, "")).strip()
+            if not raw:
+                continue
+            try:
+                value = int(raw)
+            except ValueError as error:
+                raise HTTPException(400, f"{key} must be an integer") from error
+            if value < minimum or (maximum is not None and value > maximum):
+                raise HTTPException(400, f"{key} is outside the supported range")
+            numeric_values[key] = str(value)
+        if not updates and not numeric_values:
             raise HTTPException(400, "no fields to update")
         env_path = agent.config.root_dir / ".env"
         env_map = {"RESEARCH_AGENT_LLM_PROVIDER": updates.get("llm_provider", ""),
                    "RESEARCH_AGENT_LLM_MODEL": updates.get("llm_model", ""),
                    "RESEARCH_AGENT_LLM_BASE_URL": updates.get("llm_base_url", ""),
                    "RESEARCH_AGENT_LLM_API_KEY": updates.get("llm_api_key", ""),
-                   "RESEARCH_AGENT_CONTEXT_WINDOW": str(body.get("context_window", "")).strip(),
-                   "RESEARCH_AGENT_LLM_TIMEOUT": str(body.get("llm_timeout", "")).strip(),
-                   "RESEARCH_AGENT_PROVIDER_MAX_CONCURRENCY": str(body.get("max_concurrency", "")).strip()}
+                   "RESEARCH_AGENT_CONTEXT_WINDOW": numeric_values.get("context_window", ""),
+                   "RESEARCH_AGENT_LLM_TIMEOUT": numeric_values.get("llm_timeout", ""),
+                   "RESEARCH_AGENT_PROVIDER_MAX_CONCURRENCY": numeric_values.get("max_concurrency", "")}
         if env_path.exists():
             lines = env_path.read_text(encoding="utf-8").splitlines()
             new_lines = []
+            written: set[str] = set()
             for line in lines:
                 stripped = line.strip()
                 if not stripped or stripped.startswith("#"):
@@ -135,9 +161,13 @@ def create_app(agent: ResearchChatAgent | None = None) -> Any:
                 for env_name, new_val in env_map.items():
                     if stripped.startswith(env_name + "=") and new_val:
                         new_lines.append(f"{env_name}={new_val}")
+                        written.add(env_name)
                         break
                 else:
                     new_lines.append(line)
+            new_lines.extend(
+                f"{name}={value}" for name, value in env_map.items() if value and name not in written
+            )
             env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
         else:
             env_path.write_text("\n".join(f"{k}={v}" for k, v in env_map.items() if v) + "\n", encoding="utf-8")
@@ -307,11 +337,19 @@ def create_app(agent: ResearchChatAgent | None = None) -> Any:
                 if not title and data.get("messages"):
                     first = data["messages"][0].get("content", "")[:60]
                     title = first
+                active = coordinator.active(d.name)
+                public_status = _public_status(
+                    data.get("status", ""),
+                    data.get("pending_action"),
+                    active.state if active else "",
+                )
                 result.append({
                     "run_id": d.name,
                     "created_at": data.get("created_at", ""),
                     "updated_at": data.get("updated_at", ""),
-                    "status": data.get("status", ""),
+                    "status": public_status,
+                    "session_status": data.get("status", ""),
+                    "progress": 100 if public_status == "completed" else None,
                     "title": title or "new session",
                 })
             except Exception:
@@ -338,6 +376,7 @@ def create_app(agent: ResearchChatAgent | None = None) -> Any:
             "llm_configured": config.llm_configured,
             "provider": config.llm_provider,
             "model": config.llm_model,
+            "context_window": config.context_window,
         }
 
     @app.get("/quality/outcomes")
@@ -378,7 +417,13 @@ def create_app(agent: ResearchChatAgent | None = None) -> Any:
 
     @app.post("/runs/{run_id}/cancel")
     def cancel_run(run_id: str):
+        session = load_run(run_id)
         state = coordinator.cancel(run_id)
+        if state == "cancelled":
+            session.status = "waiting_user"
+            session.pending_action = {"type": "cancelled"}
+            app.state.agent.sessions.event(session, "cancel_requested", summary="user cancelled active turn")
+            app.state.agent.sessions.save(session)
         return {"cancelled": state == "cancelled", "run_id": run_id, "status": state}
 
     @app.post("/runs/{run_id}/pause")
@@ -405,8 +450,9 @@ def create_app(agent: ResearchChatAgent | None = None) -> Any:
 
     @app.get("/runs/{run_id}")
     def run_status(run_id: str):
-        payload = _run_payload(load_run(run_id))
+        session = load_run(run_id)
         active = coordinator.active(run_id)
+        payload = _run_payload(session, active.state if active else "")
         payload["active_turn"] = ({"turn_id": active.turn_id, "status": active.state} if active else None)
         return payload
 
@@ -613,11 +659,67 @@ def create_app(agent: ResearchChatAgent | None = None) -> Any:
     return app
 
 
-def _run_payload(session: Any) -> dict[str, Any]:
+def _public_status(session_status: str, pending_action: Any = None, active_turn_status: str = "") -> str:
+    if active_turn_status:
+        return active_turn_status
+    pending_type = pending_action.get("type") if isinstance(pending_action, dict) else ""
+    if pending_type in {"tool_approval", "plan_approval"}:
+        return "waiting_approval"
+    if pending_type == "cancelled":
+        return "cancelled"
+    status = str(session_status or "").lower()
+    if status == "active":
+        return "idle"
+    return status or "idle"
+
+
+def _workflow_projection(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    steps: list[dict[str, Any]] = []
+    for sequence, event in enumerate(events, start=1):
+        event_type = str(event.get("event") or "")
+        skill = str(event.get("skill") or "")
+        if event_type == "tool_requested":
+            steps.append({
+                "id": f"tool-{sequence}",
+                "skill": skill,
+                "status": "queued",
+                "summary": "",
+                "turn": event.get("turn"),
+                "started_at": event.get("timestamp", ""),
+            })
+            continue
+        if event_type in {"cancelled", "failed"}:
+            terminal_status = "cancelled" if event_type == "cancelled" else "failed"
+            for item in steps:
+                if item["status"] in {"queued", "running"}:
+                    item["status"] = terminal_status
+                    item["finished_at"] = event.get("timestamp", "")
+            continue
+        if event_type not in {"tool_started", "tool_observed"}:
+            continue
+        step = next(
+            (item for item in reversed(steps) if item["skill"] == skill and item["status"] != "completed"),
+            None,
+        )
+        if step is None:
+            step = {
+                "id": f"tool-{sequence}", "skill": skill, "status": "queued",
+                "summary": "", "turn": event.get("turn"), "started_at": event.get("timestamp", ""),
+            }
+            steps.append(step)
+        if event_type == "tool_started":
+            step["status"] = "running"
+        else:
+            step["status"] = "completed" if event.get("ok", True) else "failed"
+            step["summary"] = str(event.get("summary") or "")
+            step["finished_at"] = event.get("timestamp", "")
+    return steps[-50:]
+
+
+def _run_payload(session: Any, active_turn_status: str = "") -> dict[str, Any]:
     latest_assistant = next((item["content"] for item in reversed(session.messages) if item.get("role") == "assistant"), "")
     start = max(1, len(session.events) - 49)
     events = [{"sequence": sequence, **item} for sequence, item in enumerate(session.events[-50:], start=start)]
-    token_usage = 0
     context_size = 0
     log = Path(__file__).resolve().parents[1] / "runs" / "sessions" / session.session_id / "provider_calls.jsonl"
     if log.exists():
@@ -625,27 +727,29 @@ def _run_payload(session: Any) -> dict[str, Any]:
             if not line.strip(): continue
             try:
                 call = json.loads(line)
-                token_usage += call.get("usage", {}).get("total_tokens", 0)
                 prompt = call.get("usage", {}).get("prompt_tokens", 0)
                 if prompt:
                     context_size = prompt
             except Exception: pass
-    window = max(1, int(_load_dotenv(Path(__file__).resolve().parents[1] / ".env").get("RESEARCH_AGENT_CONTEXT_WINDOW", "")) or 0)
+    window = max(0, int(_load_dotenv(Path(__file__).resolve().parents[1] / ".env").get("RESEARCH_AGENT_CONTEXT_WINDOW", "") or 0))
+    public_status = _public_status(session.status, session.pending_action, active_turn_status)
     return {
         "run_id": session.session_id,
         "session_id": session.session_id,
-        "status": session.status,
+        "status": public_status,
+        "session_status": session.status,
+        "progress": 100 if public_status == "completed" else None,
         "created_at": session.created_at,
         "events": events,
-        "artifacts": session.artifact_records,
+        "artifacts": public_artifacts(session.artifact_records),
         "latest_assistant_message": latest_assistant,
         "pending_action": session.pending_action,
         "plan_mode": session.metadata.get("plan_mode", False),
-        "token_usage": token_usage,
         "context_size": context_size,
-        "window_size": window or 1000000,
+        "window_size": window,
         "messages": [{"role": m.get("role"), "content": m.get("content", "")} for m in session.messages[-30:]],
         "outcome_report": session.metadata.get("outcome_report", ""),
+        "workflow_steps": _workflow_projection(session.events),
     }
 
 
@@ -658,10 +762,12 @@ def _chat_payload(response: Any) -> dict[str, Any]:
         "status": session.status,
         "waiting": bool(session.pending_action),
         "events": session.events[-20:],
-        "artifacts": session.artifact_records,
+        "artifacts": public_artifacts(session.artifact_records),
         "task_ledger": session.task_ledger[-12:],
         "outcome_report": session.metadata.get("outcome_report", ""),
     }
 
 
 app = create_app() if FastAPI is not None else None
+if app is not None:
+    atexit.register(app.state.agent.close)

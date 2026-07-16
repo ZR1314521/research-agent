@@ -2,6 +2,13 @@ import React from "react";
 import { act } from "react-dom/test-utils";
 import { createRoot } from "react-dom/client";
 import { TextDecoder as NodeTextDecoder } from "util";
+
+jest.mock("react-markdown", () => {
+  const ReactRuntime = require("react");
+  return ({ children, className }) => ReactRuntime.createElement("div", { className }, children);
+});
+jest.mock("remark-gfm", () => () => {});
+
 import App from "./App";
 
 global.IS_REACT_ACT_ENVIRONMENT = true;
@@ -205,8 +212,8 @@ test("returning to a running conversation reconnects to that turn", async () => 
     if (url.includes("/runs/run-a/turns/turn-a/events")) {
       return Promise.resolve(streamResponse([
         { event: "turn_started", turn_id: "turn-a", sequence: 1 },
-        { event: "assistant_delta", turn_id: "turn-a", sequence: 2, text: "A live answer" },
-        { event: "turn_finished", turn_id: "turn-a", sequence: 3, assistant_message: "A live answer" },
+        { event: "assistant_delta", turn_id: "turn-a", sequence: 2, text: "正在检索资料" },
+        { event: "turn_finished", turn_id: "turn-a", sequence: 3, assistant_message: "这是最终趋势结论" },
       ]));
     }
     throw new Error(`Unexpected fetch: ${url}`);
@@ -236,8 +243,15 @@ test("returning to a running conversation reconnects to that turn", async () => 
   });
 
   expect(global.fetch.mock.calls.some(([input]) => String(input).includes("/runs/run-a/turns/turn-a/events"))).toBe(true);
-  expect(container.textContent).toContain("A live answer");
+  expect(container.textContent).toContain("这是最终趋势结论");
+  expect(container.textContent).not.toContain("正在检索资料");
   expect(container.textContent).not.toContain("B content");
+
+  expect(container.querySelector(".run-inspector")).toBeNull();
+  await act(async () => {
+    container.querySelector(".task-details-button").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+  expect(container.querySelector(".run-inspector")).not.toBeNull();
 
   await act(async () => root.unmount());
   container.remove();

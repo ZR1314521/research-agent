@@ -35,7 +35,7 @@ class ToolExecutor:
         self.config = config
         self.registry = registry
         self.session_dir = session_dir
-        self.literature = LiteratureService(config, session_dir)
+        self.literature = LiteratureService(config, session_dir, cancel_event)
         self.writing = WritingService(config, session_dir, cancel_event)
         self.files = FileService(session_dir)
         self.documents = DocumentService(session_dir)
@@ -125,7 +125,7 @@ class ToolExecutor:
         if handler is None:
             raise ValueError(f"No local handler for skill: {skill_name}")
         validate_arguments(spec.input_schema, arguments)
-        missing_artifacts = has_required_artifacts(session, spec.consumes)
+        missing_artifacts = has_required_artifacts(session, spec.consumes, self.registry)
         if missing_artifacts:
             raise ContractError(
                 "missing_artifact",

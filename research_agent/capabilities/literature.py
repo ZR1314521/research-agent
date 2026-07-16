@@ -1,43 +1,22 @@
 from __future__ import annotations
 
 import json
-import math
 import re
 import time
-from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import replace
 from pathlib import Path
+from threading import Event
 from typing import Any
 
 from research_agent.config import AgentConfig
+from research_agent.context import ContextManager
+from research_agent.logging import ModelCallLogger
+from research_agent.tools.llm_client import LLMClient
 from research_agent.tools.arxiv import ArxivClient
 from research_agent.tools.openalex import OpenAlexClient
 from research_agent.tools.pubmed import PubMedClient
 from research_agent.tools.semantic_scholar import SemanticScholarClient
-
-
-STOPWORDS = {
-    "about", "analysis", "and", "approach", "based", "for", "from", "method", "model",
-    "paper", "research", "results", "study", "system", "the", "this", "using", "with",
-    "of", "in", "to", "a", "an", "on", "by", "as", "at", "or", "is", "are",
-    "latest", "recent", "best", "review", "literature",
-}
-ALIASES = {
-    "cnn": {"cnn", "convolutional", "convolution"},
-    "bci": {"bci", "brain-computer", "braincomputer"},
-    "eeg": {"eeg", "electroencephalography", "electroencephalogram"},
-    "llm": {"llm", "language-model", "language"},
-    "mdd": {"mdd", "depression", "depressive", "depressed"},
-    "depression": {"mdd", "depression", "depressive", "depressed"},
-    "rag": {"rag", "retrieval-augmented", "retrieval"},
-    "review": {"review", "survey", "综述"},
-    "preprint": {"preprint", "arxiv", "biorxiv", "medrxiv"},
-    "alzheimer": {"alzheimer", "alzheimers", "ad"},
-}
-
-
-def tokens(text: str) -> list[str]:
-    values = re.findall(r"[A-Za-z][A-Za-z0-9-]{1,}|[\u4e00-\u9fff]{2,}", text or "")
-    return [value.lower() for value in values if value.lower() not in STOPWORDS]
 
 
 def normalized_title(title: str) -> str:
@@ -45,23 +24,46 @@ def normalized_title(title: str) -> str:
 
 
 class LiteratureService:
-    def __init__(self, config: AgentConfig, session_dir: Path):
+    def __init__(self, config: AgentConfig, session_dir: Path, cancel_event: Event | None = None):
         self.config = config
         self.session_dir = session_dir
         self.raw_dir = session_dir / "raw_search"
         self.raw_dir.mkdir(parents=True, exist_ok=True)
+        structured_config = replace(
+            config,
+            llm_timeout_seconds=config.structured_llm_timeout_seconds,
+            llm_max_tokens=config.structured_llm_max_tokens,
+            llm_retry=config.structured_llm_retry,
+        )
+        self.client = LLMClient(structured_config, ModelCallLogger(session_dir), cancel_event)
+        self._assessment_cache: dict[str, dict[str, Any]] = {}
+        self._last_next_query = ""
+        self._last_semantic_stop = False
+        self._last_semantic_stop_reason = ""
+        self._last_assessment_available = True
 
     def search(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        query = str(arguments.get("query") or "").strip()
-        if not query:
+        queries = list(dict.fromkeys(
+            str(item).strip()
+            for item in ([arguments.get("query")] + list(arguments.get("queries") or []))
+            if str(item or "").strip()
+        ))
+        if not queries:
             raise ValueError("Literature search needs a topic or query")
+        queries = queries[:self.config.literature_max_batch_queries]
+        query = queries[0]
+        if len(queries) > 1:
+            return self._search_batch(arguments, queries)
         year_from = self._int(arguments.get("year_from"))
         year_to = self._int(arguments.get("year_to"))
         venues = [str(item).strip() for item in arguments.get("venues") or [] if str(item).strip()]
         sources = [str(item) for item in arguments.get("sources") or ["openalex"]]
-        limit = max(1, min(50, self._int(arguments.get("limit")) or 12))
-        max_rounds = max(1, min(3, self._int(arguments.get("rounds")) or 1))
-        max_requests_per_source = max(1, min(10, self._int(arguments.get("max_requests_per_source")) or 2))
+        limit = max(1, min(self.config.literature_max_limit, self._int(arguments.get("limit")) or self.config.literature_default_limit))
+        max_rounds = max(1, min(self.config.literature_max_rounds, self._int(arguments.get("rounds")) or 1))
+        max_requests_per_source = max(1, min(
+            self.config.literature_max_requests_per_source,
+            self._int(arguments.get("max_requests_per_source")) or self.config.literature_max_requests_per_source,
+        ))
         must_include = [str(item) for item in arguments.get("must_include") or [] if str(item).strip()]
         exclude = [str(item) for item in arguments.get("exclude") or [] if str(item).strip()]
         precise = bool(arguments.get("precise") or must_include or exclude)
@@ -72,7 +74,6 @@ class LiteratureService:
         errors: list[dict[str, str]] = []
         rounds: list[dict[str, Any]] = []
         current_query = query
-        known_terms = set(tokens(query))
         source_attempts: dict[str, int] = {source: 0 for source in sources}
         blocked_sources: set[str] = set()
 
@@ -94,18 +95,20 @@ class LiteratureService:
                     continue
                 try:
                     source_attempts[source] = source_attempts.get(source, 0) + 1
+                    fetch_limit = min(max(limit, 10), self.config.literature_screening_limit)
                     papers = client.search(
                         current_query,
                         year_from=year_from,
                         year_to=year_to,
-                        limit=max(limit, 10),
+                        limit=fetch_limit,
                     )
                     (self.raw_dir / f"round_{round_number}_{source}.json").write_text(
                         json.dumps(papers, ensure_ascii=False, indent=2), encoding="utf-8"
                     )
                     round_results.extend(papers)
                     source_requests.append({"source": source, "status": "ok", "count": len(papers), "attempt": source_attempts[source]})
-                    time.sleep(0.3)  # polite pause between API calls
+                    if self.config.literature_request_delay_seconds:
+                        time.sleep(self.config.literature_request_delay_seconds)
                 except Exception as exc:
                     error = str(exc)
                     errors.append({"source": source, "error": error})
@@ -113,8 +116,10 @@ class LiteratureService:
                     if "429" in error or "too many" in error.lower() or "rate" in error.lower():
                         blocked_sources.add(source)
             pool = self._dedupe([*pool, *round_results])
-            screened, excluded, edge = self.screen_with_edge(pool, query, year_from, year_to, venues, must_include, exclude, precise)
-            new_terms = self._expand(screened or pool, known_terms)
+            candidates = pool[:self.config.literature_screening_limit]
+            screened, excluded, edge = self.screen_with_edge(candidates, query, year_from, year_to, venues, must_include, exclude, precise)
+            next_query = self._last_next_query.strip()
+            new_terms = [next_query] if next_query and next_query != current_query else []
             stop_reason = ""
             if len(screened) >= limit:
                 stop_reason = "target_reached"
@@ -124,6 +129,8 @@ class LiteratureService:
                 stop_reason = "all_sources_failed_or_blocked"
             elif not new_terms:
                 stop_reason = "no_new_terms"
+            elif self._last_semantic_stop:
+                stop_reason = self._last_semantic_stop_reason or "semantic_saturation"
             rounds.append(
                 {
                     "round": round_number,
@@ -139,10 +146,10 @@ class LiteratureService:
             )
             if stop_reason or round_number == max_rounds:
                 break
-            known_terms.update(new_terms)
-            current_query = " ".join([query, *new_terms])
+            current_query = next_query
 
-        screened, excluded, edge = self.screen_with_edge(pool, query, year_from, year_to, venues, must_include, exclude, precise)
+        candidates = pool[:self.config.literature_screening_limit]
+        screened, excluded, edge = self.screen_with_edge(candidates, query, year_from, year_to, venues, must_include, exclude, precise)
         screened = screened[:limit]
         paths = self._write_outputs(query, screened, excluded, edge, rounds, errors)
         requested = str(arguments.get("output_path") or "").strip()
@@ -152,6 +159,93 @@ class LiteratureService:
             "message": self._search_message(screened, errors, paths),
             "artifacts": paths,
             "data": {"count": len(screened), "papers": screened, "rounds": rounds, "errors": errors},
+            "model_data": self._answer_evidence(query, screened, errors),
+            "progress": {
+                "summary": f"文献检索与筛选完成：纳入 {len(screened)} 篇",
+                "metrics": {"retrieved": len(pool), "evaluated": len(candidates), "included": len(screened), "excluded": len(excluded), "edge": len(edge)},
+            },
+        }
+
+    def _search_batch(self, arguments: dict[str, Any], queries: list[str]) -> dict[str, Any]:
+        year_from = self._int(arguments.get("year_from"))
+        year_to = self._int(arguments.get("year_to"))
+        venues = [str(item).strip() for item in arguments.get("venues") or [] if str(item).strip()]
+        sources = list(dict.fromkeys(str(item).strip() for item in arguments.get("sources") or ["openalex"] if str(item).strip()))
+        limit = max(1, min(self.config.literature_max_limit, self._int(arguments.get("limit")) or self.config.literature_default_limit))
+        must_include = [str(item) for item in arguments.get("must_include") or [] if str(item).strip()]
+        exclude = [str(item) for item in arguments.get("exclude") or [] if str(item).strip()]
+        precise = bool(arguments.get("precise") or must_include or exclude)
+        if arguments.get("no_network"):
+            raise ValueError("当前请求禁止联网；请先上传资料，或取消不要联网限制。")
+
+        results: list[dict[str, Any]] = []
+        result_batches: dict[tuple[int, str], list[dict[str, Any]]] = {}
+        errors: list[dict[str, str]] = []
+        requests: list[dict[str, Any]] = []
+
+        def fetch(query_index: int, source: str, scholarly_query: str) -> tuple[int, str, str, list[dict[str, Any]]]:
+            client = self._client(source)
+            if client is None:
+                raise ValueError("unsupported source")
+            fetch_limit = min(max(limit, 10), self.config.literature_screening_limit)
+            papers = client.search(scholarly_query, year_from=year_from, year_to=year_to, limit=fetch_limit)
+            return query_index, source, scholarly_query, papers
+
+        jobs = [(index, source, scholarly_query) for index, scholarly_query in enumerate(queries, 1) for source in sources]
+        with ThreadPoolExecutor() as pool:
+            futures = {pool.submit(fetch, *job): job for job in jobs}
+            for future in as_completed(futures):
+                query_index, source, scholarly_query = futures[future]
+                try:
+                    _, _, _, papers = future.result()
+                    (self.raw_dir / f"batch_{query_index}_{source}.json").write_text(
+                        json.dumps(papers, ensure_ascii=False, indent=2), encoding="utf-8"
+                    )
+                    result_batches[(query_index, source)] = papers
+                    requests.append({"query": scholarly_query, "source": source, "status": "ok", "count": len(papers)})
+                except Exception as exc:
+                    error = str(exc)
+                    errors.append({"source": source, "query": scholarly_query, "error": error})
+                    requests.append({"query": scholarly_query, "source": source, "status": "error", "error": error})
+
+        ordered_batches = [
+            result_batches.get((index, source), [])
+            for index, _query in enumerate(queries, 1)
+            for source in sources
+        ]
+        for offset in range(max((len(batch) for batch in ordered_batches), default=0)):
+            for batch in ordered_batches:
+                if offset < len(batch):
+                    results.append(batch[offset])
+        deduplicated = self._dedupe(results)
+        screening_candidates = deduplicated[:min(limit, self.config.literature_screening_limit)]
+        research_question = str(arguments.get("request") or queries[0]).strip()
+        screened, excluded, edge = self.screen_with_edge(
+            screening_candidates, research_question, year_from, year_to, venues, must_include, exclude, precise
+        )
+        screened = screened[:limit]
+        rounds = [{
+            "round": 1,
+            "queries": queries,
+            "pool_size": len(deduplicated),
+            "screened": len(screened),
+            "edge": len(edge),
+            "source_requests": requests,
+            "stop_reason": "batch_complete",
+        }]
+        paths = self._write_outputs(research_question, screened, excluded, edge, rounds, errors)
+        requested = str(arguments.get("output_path") or "").strip()
+        if requested:
+            paths["requested_output"] = str(self._save_requested(requested, research_question, screened))
+        return {
+            "message": self._search_message(screened, errors, paths),
+            "artifacts": paths,
+            "data": {"count": len(screened), "papers": screened, "rounds": rounds, "errors": errors},
+            "model_data": self._answer_evidence(research_question, screened, errors),
+            "progress": {
+                "summary": f"批量检索完成：获取 {len(results)} 篇，去重后 {len(deduplicated)} 篇，纳入 {len(screened)} 篇",
+                "metrics": {"retrieved": len(results), "deduplicated": len(deduplicated), "evaluated": len(screening_candidates), "included": len(screened), "excluded": len(excluded), "edge": len(edge)},
+            },
         }
 
     def screen_active(self, papers_path: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -181,6 +275,7 @@ class LiteratureService:
             "message": f"筛选完成：保留 {len(screened)} 篇，边缘 {len(edge)} 篇，排除 {len(excluded)} 篇。",
             "artifacts": {"active_papers": str(active), "excluded_papers": str(dropped), "edge_papers": str(edge_path)},
             "data": {"count": len(screened), "papers": screened, "edge": edge},
+            "model_data": self._answer_evidence(query, screened, []),
         }
 
     def screen(
@@ -205,10 +300,11 @@ class LiteratureService:
         exclude: list[str],
         precise: bool,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-        included, excluded, edge = [], [], []
-        concepts = list(dict.fromkeys(tokens(" ".join(must_include) if must_include else query)))
-        exclude_concepts = list(dict.fromkeys(tokens(" ".join(exclude))))
-        for raw in papers:
+        included: list[dict[str, Any]] = []
+        excluded: list[dict[str, Any]] = []
+        edge: list[dict[str, Any]] = []
+        eligible: list[tuple[str, dict[str, Any]]] = []
+        for index, raw in enumerate(papers):
             paper = dict(raw)
             year = self._int(paper.get("year"))
             venue = str(paper.get("venue") or "")
@@ -219,88 +315,231 @@ class LiteratureService:
                 reason = "after_year_range"
             elif venues and not any(item.lower() in venue.lower() for item in venues):
                 reason = "venue_not_matched"
-            score, reasons = self._score(paper, concepts)
-            missing_required = [term for term in concepts if not self._paper_matches(paper, term)]
-            excluded_terms = [term for term in exclude_concepts if self._paper_matches(paper, term)]
-            if self._is_preprint(paper) and any(term in {"preprint", "arxiv"} for term in exclude_concepts):
-                excluded_terms.append("preprint")
-            if excluded_terms:
-                reason = "excluded_terms:" + ",".join(dict.fromkeys(excluded_terms))
-            elif precise and missing_required:
-                reason = "missing_required_terms:" + ",".join(missing_required)
-            paper["relevance_score"] = score
-            paper["screening_reasons"] = reasons
-            paper["missing_required_terms"] = missing_required
-            paper["matched_required_terms"] = [term for term in concepts if term not in missing_required]
-            # The score ranks evidence but never vetoes explicit criteria.
-            # Hard exclusion comes only from user/model supplied constraints.
             if reason:
                 paper["exclusion_reason"] = reason
-                if reason.startswith("missing_required_terms") and paper["matched_required_terms"]:
-                    edge.append(paper)
-                else:
-                    excluded.append(paper)
+                paper["screening_reasons"] = [reason]
+                excluded.append(paper)
+                continue
+            eligible.append((f"p{index}", paper))
+
+        assessment = self._semantic_assessment(
+            eligible, query=query, must_include=must_include, exclude=exclude, precise=precise
+        )
+        decisions = {
+            str(item.get("id") or ""): item
+            for item in assessment.get("papers", [])
+            if isinstance(item, dict)
+        }
+        self._last_next_query = str(assessment.get("next_query") or "").strip()
+        self._last_semantic_stop = bool(assessment.get("stop"))
+        self._last_semantic_stop_reason = str(assessment.get("stop_reason") or "")
+        self._last_assessment_available = bool(assessment.get("_assessment_available", True))
+        for paper_id, paper in eligible:
+            decision = decisions.get(paper_id, {})
+            bucket = str(decision.get("decision") or "edge").lower()
+            if bucket not in {"include", "edge", "exclude"}:
+                bucket = "edge"
+            try:
+                score = max(0.0, min(100.0, float(decision.get("score"))))
+            except (TypeError, ValueError):
+                score = None
+            reasons = decision.get("reasons") if isinstance(decision.get("reasons"), list) else []
+            concise_reason = str(decision.get("reason") or "").strip()
+            if not reasons and concise_reason:
+                reasons = [concise_reason]
+            paper["relevance_score"] = score
+            paper["screening_reasons"] = [str(item) for item in reasons if str(item).strip()]
+            paper["matched_required_terms"] = [
+                str(item) for item in (decision.get("matched_requirements") or []) if str(item).strip()
+            ]
+            paper["missing_required_terms"] = [
+                str(item) for item in (decision.get("missing_requirements") or []) if str(item).strip()
+            ]
+            paper["semantic_assessment"] = "model" if decision else "unavailable"
+            if bucket == "exclude":
+                paper["exclusion_reason"] = str(decision.get("exclusion_reason") or "semantic_exclusion")
+                excluded.append(paper)
+            elif bucket == "edge":
+                paper["exclusion_reason"] = str(decision.get("exclusion_reason") or "needs_human_review")
+                edge.append(paper)
             else:
                 included.append(paper)
-        included.sort(key=lambda item: (item.get("relevance_score", 0), item.get("citation_count", 0)), reverse=True)
-        excluded.sort(key=lambda item: item.get("relevance_score", 0), reverse=True)
-        edge.sort(key=lambda item: item.get("relevance_score", 0), reverse=True)
+
+        def rank(item: dict[str, Any]) -> tuple[float, int]:
+            score = item.get("relevance_score")
+            return (
+                float(score) if isinstance(score, (int, float)) else -1.0,
+                self._int(item.get("citation_count")) or 0,
+            )
+
+        included.sort(key=rank, reverse=True)
+        excluded.sort(key=rank, reverse=True)
+        edge.sort(key=rank, reverse=True)
         return included, excluded, edge
 
-    def _score(self, paper: dict[str, Any], concepts: list[str]) -> tuple[int, list[str]]:
-        if not concepts:
-            return 50, ["no_query_terms"]
-        title_terms = set(tokens(str(paper.get("title") or "")))
-        abstract_terms = set(tokens(str(paper.get("abstract") or "")))
-        title_hits = [term for term in concepts if self._matches(term, title_terms)]
-        abstract_hits = [term for term in concepts if self._matches(term, abstract_terms)]
-        title_ratio = len(title_hits) / len(concepts)
-        abstract_ratio = len(abstract_hits) / len(concepts)
-        score = title_ratio * 50 + abstract_ratio * 35
-        if title_hits:
-            score += 5
-        if paper.get("abstract"):
-            score += 3
-        if paper.get("doi"):
-            score += 2
-        citations = max(0, self._int(paper.get("citation_count")) or 0)
-        score += min(5, math.log10(citations + 1) * 2)
-        reasons = []
-        if title_hits:
-            reasons.append("title:" + ",".join(title_hits))
-        if abstract_hits:
-            reasons.append("abstract:" + ",".join(abstract_hits))
-        return max(0, min(100, round(score))), reasons
+    def _semantic_assessment(
+        self,
+        papers: list[tuple[str, dict[str, Any]]],
+        *,
+        query: str,
+        must_include: list[str],
+        exclude: list[str],
+        precise: bool,
+    ) -> dict[str, Any]:
+        candidates = [
+            {
+                "id": paper_id,
+                "title": paper.get("title"),
+                "abstract": str(paper.get("abstract") or ""),
+                "year": paper.get("year"),
+                "venue": paper.get("venue"),
+                "keywords": paper.get("keywords"),
+                "source": paper.get("source"),
+                "type": paper.get("type") or (paper.get("raw_metadata") or {}).get("type"),
+            }
+            for paper_id, paper in papers
+        ]
+        candidates = self._fit_screening_candidates(candidates)
+        cache_key = json.dumps(
+            {"query": query, "must_include": must_include, "exclude": exclude, "precise": precise, "papers": candidates},
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        )
+        if cache_key in self._assessment_cache:
+            return self._assessment_cache[cache_key]
+        if not candidates:
+            return {
+                "papers": [], "next_query": "", "stop": True,
+                "stop_reason": "no_eligible_candidates", "_assessment_available": False,
+            }
+        prompt = json.dumps(
+            {
+                "research_question": query,
+                "required_concepts": must_include,
+                "excluded_concepts_or_study_types": exclude,
+                "strict_all_requirements": precise,
+                "candidates": candidates,
+                "output_contract": {
+                    "included": [{"id": "candidate id", "score": "0..100", "reason": "one short sentence"}],
+                    "edge": [{"id": "candidate id", "score": "0..100", "reason": "one short sentence"}],
+                    "excluded_ids": ["candidate id"],
+                    "next_query": "a complete refined scholarly query, or empty string",
+                    "stop": "boolean", "stop_reason": "short reason",
+                },
+            },
+            ensure_ascii=False,
+        )
+        result = self.client.complete(
+            "literature_semantic_screening",
+            prompt,
+            system=(
+                "You are a conservative academic screening evaluator. Interpret scientific meaning, negation, synonyms, "
+                "population, method, and study type from supplied metadata only. Return one valid JSON object matching "
+                "the contract and no prose. Give reasons only for included or edge candidates; excluded candidates go "
+                "only in excluded_ids. Never invent missing evidence. Borderline or insufficient evidence must be edge."
+            ),
+            temperature=0,
+        )
+        parsed = self._json_object(result.text) if result.used_remote_model else None
+        if isinstance(parsed, dict) and not isinstance(parsed.get("papers"), list):
+            compact_shape = all(isinstance(parsed.get(key, []), list) for key in ("included", "edge", "excluded_ids"))
+            if compact_shape and any(key in parsed for key in ("included", "edge", "excluded_ids")):
+                normalized: list[dict[str, Any]] = []
+                for decision, key in (("include", "included"), ("edge", "edge")):
+                    for item in parsed.get(key, []):
+                        entry = dict(item) if isinstance(item, dict) else {"id": str(item)}
+                        entry["decision"] = decision
+                        normalized.append(entry)
+                normalized.extend(
+                    {"id": str(item), "decision": "exclude"}
+                    for item in parsed.get("excluded_ids", [])
+                )
+                parsed["papers"] = normalized
+        if isinstance(parsed, dict) and isinstance(parsed.get("papers"), list):
+            parsed["_assessment_available"] = True
+        else:
+            parsed = {
+                "papers": [
+                    {
+                        "id": paper_id, "decision": "edge", "score": None,
+                        "reason": "semantic_assessment_unavailable",
+                        "exclusion_reason": "needs_human_review",
+                    }
+                    for paper_id, _paper in papers
+                ],
+                "next_query": "", "stop": True, "stop_reason": "semantic_assessment_unavailable",
+                "_assessment_available": False,
+            }
+        self._assessment_cache[cache_key] = parsed
+        return parsed
 
-    def _matches(self, concept: str, terms: set[str]) -> bool:
-        options = ALIASES.get(concept, {concept})
-        return bool(options & terms)
+    def _fit_screening_candidates(self, candidates: list[dict[str, Any]], budget: int | None = None) -> list[dict[str, Any]]:
+        """Fit candidate evidence to the configured observation budget without topic rules."""
+        budget = max(256, int(budget or self.config.context_observation_budget))
+        if ContextManager.estimate_tokens(candidates) <= budget:
+            return candidates
+        longest = max((len(str(item.get("abstract") or "")) for item in candidates), default=0)
+        low, high = 0, longest
+        best = [{**item, "abstract": ""} for item in candidates]
+        while low <= high:
+            width = (low + high) // 2
+            probe = [{**item, "abstract": str(item.get("abstract") or "")[:width]} for item in candidates]
+            if ContextManager.estimate_tokens(probe) <= budget:
+                best = probe
+                low = width + 1
+            else:
+                high = width - 1
+        return best
 
-    def _paper_matches(self, paper: dict[str, Any], concept: str) -> bool:
-        full_text = " ".join(
-            [
-                str(paper.get("title") or ""),
-                str(paper.get("abstract") or ""),
-                str(paper.get("venue") or ""),
-            ]
-        ).lower()
-        if concept.lower() in {"mdd", "depression"} and re.search(r"without\s+(?:depression|mdd)|without[^.]{0,40}(?:depression|mdd)|no\s+(?:depression|mdd)", full_text):
-            return False
-        terms = set(tokens(" ".join(
-            [
-                str(paper.get("title") or ""),
-                str(paper.get("abstract") or ""),
-                str(paper.get("venue") or ""),
-                " ".join(str(item.get("display_name", "")) for item in (paper.get("keywords") or []) if isinstance(item, dict)),
-            ]
-        )))
-        return self._matches(concept.lower(), terms)
+    def _answer_evidence(
+        self,
+        research_question: str,
+        papers: list[dict[str, Any]],
+        errors: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Provide a compact, sufficient synthesis payload instead of forcing artifact rereads."""
+        evidence = [
+            {
+                "id": f"p{index}",
+                "title": paper.get("title"),
+                "authors": list(paper.get("authors") or [])[:3],
+                "year": paper.get("year"),
+                "venue": paper.get("venue"),
+                "abstract": str(paper.get("abstract") or ""),
+                "doi": paper.get("doi"),
+                "url": paper.get("url") or paper.get("open_access_url"),
+                "relevance_score": paper.get("relevance_score"),
+                "screening_reasons": paper.get("screening_reasons") or [],
+            }
+            for index, paper in enumerate(papers, 1)
+        ]
+        evidence_budget = max(256, int(self.config.context_observation_budget * 0.72))
+        answer_ready = bool(papers) and self._last_assessment_available
+        return {
+            "answer_ready": answer_ready,
+            "missing_evidence": [] if answer_ready else ["No semantically screened papers are available."],
+            "research_question": research_question,
+            "included_count": len(papers),
+            "papers": self._fit_screening_candidates(evidence, evidence_budget),
+            "source_errors": errors,
+            "completion_guidance": (
+                "The supplied evidence is sufficient for a concise user-facing synthesis. "
+                "Answer now unless the user explicitly requested an additional artifact or a named missing field."
+            ) if answer_ready else "Explain the evidence gap plainly; do not present unscreened candidates as findings.",
+        }
 
-    def _is_preprint(self, paper: dict[str, Any]) -> bool:
-        venue = str(paper.get("venue") or "").lower()
-        source = str(paper.get("source") or "").lower()
-        raw_type = str((paper.get("raw_metadata") or {}).get("type") or paper.get("type") or "").lower()
-        return "arxiv" in venue or "arxiv" in source or "preprint" in raw_type
+    @staticmethod
+    def _json_object(text: str) -> dict[str, Any] | None:
+        value = str(text or "").strip()
+        if value.startswith("```"):
+            lines = value.splitlines()
+            value = "\n".join(lines[1:-1]).strip() if len(lines) >= 3 else ""
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, dict) else None
 
     def _dedupe(self, papers: list[dict[str, Any]]) -> list[dict[str, Any]]:
         merged: dict[str, dict[str, Any]] = {}
@@ -327,12 +566,6 @@ class LiteratureService:
             if source and source not in current["sources"]:
                 current["sources"].append(source)
         return list(merged.values())
-
-    def _expand(self, papers: list[dict[str, Any]], known: set[str]) -> list[str]:
-        counter: Counter[str] = Counter()
-        for paper in papers[:10]:
-            counter.update(tokens(f"{paper.get('title', '')} {paper.get('abstract', '')}"))
-        return [term for term, _ in counter.most_common(30) if term not in known and term not in STOPWORDS][:2]
 
     def _write_outputs(
         self,

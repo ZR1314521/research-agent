@@ -59,6 +59,9 @@ class ResearchChatAgent:
         if not text:
             return ChatResponse("请输入科研任务。", session)
         pending_approval = (session.pending_action or {}).get("type") in {"tool_approval", "plan_approval"}
+        if (session.pending_action or {}).get("type") == "cancelled":
+            session.pending_action = None
+            session.status = "active"
         if text.startswith("/"):
             command = text.partition(" ")[0].lower()
             if pending_approval and command not in {"/approve", "/reject", "/status"}:

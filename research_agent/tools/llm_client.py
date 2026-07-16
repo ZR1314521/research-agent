@@ -12,7 +12,11 @@ from typing import Any, Callable, Iterable, Protocol
 
 from research_agent.config import AgentConfig
 from research_agent.logging import ModelCallLogger
-from research_agent.provider_runtime import CallLedger, ProviderEvent, current_event_sink
+from research_agent.provider_runtime import (
+    CallLedger,
+    ProviderEvent,
+    current_event_sink,
+)
 
 
 @dataclass
@@ -251,10 +255,18 @@ class ModelGateway:
         prompt_for_log: str,
         on_event: EventSink | None,
     ) -> tuple[dict[str, Any] | None, int, str, float | None, str]:
-        sink = on_event or current_event_sink()
+        inherited_sink = current_event_sink()
+        sink = on_event or inherited_sink
+        # A turn-level sink is inherited by nested capability clients so their
+        # lifecycle and usage remain observable. Their streamed payload is an
+        # internal protocol, however, and must never become assistant chat.
+        # Only an explicitly supplied sink opts a model call into user-visible
+        # token streaming (the main AgentLoop does this).
+        adapter_sink = sink if on_event is not None else (lambda _event: None) if sink else None
         attempts = 1 + max(0, self.config.llm_retry)
         last_error = ""
         for attempt in range(1, attempts + 1):
+            request_body = dict(body)
             if attempt > 1:
                 _time.sleep(1.0)  # polite back-off between retries
             call = self.ledger.begin(self.config.llm_provider, self.config.llm_model, operation, attempt)
@@ -265,7 +277,7 @@ class ModelGateway:
                     "trigger_event_id": call.trigger_event_id,
                 }))
             try:
-                data = self.adapter.request(body, timeout=timeout, on_event=sink)
+                data = self.adapter.request(request_body, timeout=timeout, on_event=adapter_sink)
                 usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
                 self.ledger.finish(call, "completed", usage=usage)
                 if sink:
@@ -309,6 +321,14 @@ class ModelGateway:
             prompt=prompt_for_log, response="", status="failed", error=last_error,
         )
         return None, attempts, last_error or "model_request_failed", None, ""
+
+    @staticmethod
+    def _estimate_request_tokens(body: dict[str, Any]) -> int:
+        """Conservatively reserve provider-neutral input tokens before an HTTP call."""
+        payload = dict(body)
+        payload.pop("max_tokens", None)
+        encoded = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
+        return max(1, (len(encoded) + 2) // 3)
 
     def complete(
         self,

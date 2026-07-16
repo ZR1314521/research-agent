@@ -74,7 +74,15 @@ class ChartService:
         message = f"已生成 {chart_type} 图：{output}"
         if warnings:
             message += "\n注意：" + "；".join(warnings)
-        return {"message": message, "artifacts": {artifact_key: str(output)}, "data": data}
+        return {
+            "message": message,
+            "artifacts": {artifact_key: str(output)},
+            "data": data,
+            "progress": {
+                "summary": f"图表已生成：{str(arguments.get('title') or chart_type)}",
+                "metrics": {"charts": 1, "columns": len(selected_columns)},
+            },
+        }
 
     def _source(self, arguments: dict[str, Any]) -> Path:
         raw = str(arguments.get("path") or "").strip()

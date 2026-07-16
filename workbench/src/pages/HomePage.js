@@ -45,6 +45,7 @@ export default function HomePage({ onStart }) {
           <div className="hero-actions"><a className="join-cta" href="https://maas.ai-yuanjing.com/" target="_blank" rel="noreferrer"><span>Join Us</span><span aria-hidden="true">↗</span></a><button className="chat-cta" onClick={onStart}><span>Chat</span><span aria-hidden="true">→</span></button></div>
         </div>
         <div className="hero-visual" aria-hidden="true">
+          <span className="editorial-signature"><b>Research</b><b>Agent</b><i /></span>
           <span className="organic-shape shape-one" />
           <span className="organic-shape shape-two" />
           <div className="paper-card paper-main">

@@ -3,11 +3,12 @@ from __future__ import annotations
 import csv
 import json
 import math
-import re
 import statistics
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
+
+from research_agent.capabilities.charting import ChartService
 
 
 class ExperimentAnalysisService:
@@ -25,33 +26,47 @@ class ExperimentAnalysisService:
         if not rows:
             raise ValueError("Data file contains no rows")
         columns = list(rows[0])
-        id_like = [column for column in columns if self._id_like(column)]
+        roles = self._column_roles(arguments.get("column_roles"), columns)
+        id_like = roles["identifiers"]
         missing = {column: sum(self._blank(row.get(column)) for row in rows) for column in columns}
-        numeric = self._numeric_columns(rows, columns)
+        numeric = self._numeric_columns(rows, columns, set(id_like))
         summaries, outliers = self._summaries(numeric)
-        trends = self._trends(numeric)
-        groups = self._groups(rows, columns, numeric)
-        charts = self._charts(summaries, trends, groups)
+        trends = self._trends(rows, numeric, arguments.get("trend_specs") or [])
+        groups = self._groups(rows, numeric, arguments.get("group_specs") or [])
+        chart_specs = self._chart_specs(arguments.get("chart_specs") or [], columns)
+        chart_artifacts, chart_results = self._render_charts(path, chart_specs)
+        schema = self._schema(rows, columns)
         payload = {
             "file": str(path),
             "row_count": len(rows),
             "columns": columns,
+            "schema": schema,
+            "column_roles": roles,
             "id_like_columns": id_like,
             "missing_values": missing,
             "numeric_summary": summaries,
             "outliers": outliers,
             "trends": trends,
             "group_comparisons": groups,
-            "visualization_recommendations": charts,
+            "visualization_recommendations": chart_specs,
+            "rendered_charts": chart_results,
             "assumptions": [
                 "IQR outliers are exploratory flags and are not removed automatically.",
-                "ID-like columns are treated as identifiers, not continuous variables.",
+                "Column roles come only from the explicit analysis plan; names are not interpreted by regex.",
+                "No trend or group comparison is inferred when its explicit specification is absent.",
             ],
         }
         summary_path = self.session_dir / "analysis_summary.json"
+        plan_path = self.session_dir / "analysis_plan.json"
         report_path = self.session_dir / "analysis_report.md"
         outlier_path = self.session_dir / "outlier_flags.csv"
         summary_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        plan_path.write_text(json.dumps({
+            "column_roles": roles,
+            "trend_specs": arguments.get("trend_specs") or [],
+            "group_specs": arguments.get("group_specs") or [],
+            "chart_specs": chart_specs,
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
         report_path.write_text(self._report(payload), encoding="utf-8")
         with outlier_path.open("w", newline="", encoding="utf-8-sig") as handle:
             writer = csv.DictWriter(handle, fieldnames=["row", "column", "value", "lower_bound", "upper_bound"])
@@ -68,8 +83,26 @@ class ExperimentAnalysisService:
                 "analysis_summary": str(summary_path),
                 "analysis_report": str(report_path),
                 "outlier_flags": str(outlier_path),
+                "analysis_plan": str(plan_path),
+                **chart_artifacts,
             },
             "data": payload,
+            "model_data": {
+                "answer_ready": True,
+                "missing_evidence": [],
+                "row_count": payload["row_count"],
+                "columns": payload["columns"],
+                "missing_values": payload["missing_values"],
+                "numeric_summary": payload["numeric_summary"],
+                "outliers": payload["outliers"],
+                "trends": payload["trends"],
+                "group_comparisons": payload["group_comparisons"],
+                "completion_guidance": "Explain the verified statistics to the user; do not return raw JSON or code.",
+            },
+            "progress": {
+                "summary": f"数据分析完成：{len(rows)} 行，{len(columns)} 列，标记 {len(outliers)} 个异常值",
+                "metrics": {"rows": len(rows), "columns": len(columns), "outliers": len(outliers), "charts": len(chart_artifacts)},
+            },
         }
 
     def _load(self, path: Path) -> list[dict[str, Any]]:
@@ -98,10 +131,12 @@ class ExperimentAnalysisService:
         with path.open(newline="", encoding="utf-8-sig", errors="ignore") as handle:
             return list(csv.DictReader(handle, delimiter=delimiter))
 
-    def _numeric_columns(self, rows: list[dict[str, Any]], columns: list[str]) -> dict[str, list[tuple[int, float]]]:
+    def _numeric_columns(
+        self, rows: list[dict[str, Any]], columns: list[str], excluded: set[str]
+    ) -> dict[str, list[tuple[int, float]]]:
         numeric: dict[str, list[tuple[int, float]]] = {}
         for column in columns:
-            if self._id_like(column):
+            if column in excluded:
                 continue
             values = []
             for index, row in enumerate(rows, 1):
@@ -137,62 +172,122 @@ class ExperimentAnalysisService:
             }
         return summaries, flags
 
-    def _trends(self, numeric: dict[str, list[tuple[int, float]]]) -> dict[str, Any]:
-        trends = {}
-        for column, indexed in numeric.items():
-            if len(indexed) < 3:
+    def _trends(
+        self,
+        rows: list[dict[str, Any]],
+        numeric: dict[str, list[tuple[int, float]]],
+        specs: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        trends: dict[str, Any] = {}
+        for spec in specs:
+            if not isinstance(spec, dict):
                 continue
-            x = [float(row) for row, _ in indexed]
-            y = [value for _, value in indexed]
-            x_mean, y_mean = statistics.mean(x), statistics.mean(y)
-            denominator = sum((value - x_mean) ** 2 for value in x)
-            slope = 0.0 if denominator == 0 else sum((a - x_mean) * (b - y_mean) for a, b in zip(x, y)) / denominator
-            scale = max(y) - min(y)
-            normalized = 0.0 if scale == 0 else slope * max(1, len(y) - 1) / scale
-            direction = "increasing" if normalized > 0.1 else "decreasing" if normalized < -0.1 else "stable"
-            trends[column] = {"slope": slope, "normalized_change": normalized, "direction": direction}
+            x_column = str(spec.get("x") or "").strip()
+            y_columns = [str(item) for item in spec.get("y") or []]
+            if x_column not in rows[0]:
+                raise ValueError(f"Trend x column does not exist: {x_column}")
+            for column in y_columns:
+                if column not in numeric:
+                    raise ValueError(f"Trend y column is not numeric or was excluded: {column}")
+                pairs = [
+                    (self._number(row.get(x_column)), self._number(row.get(column))) for row in rows
+                ]
+                pairs = [(x, y) for x, y in pairs if x is not None and y is not None]
+                if len(pairs) < 3:
+                    continue
+                x = [pair[0] for pair in pairs]
+                y = [pair[1] for pair in pairs]
+                x_mean, y_mean = statistics.mean(x), statistics.mean(y)
+                denominator = sum((value - x_mean) ** 2 for value in x)
+                slope = 0.0 if denominator == 0 else sum((a - x_mean) * (b - y_mean) for a, b in zip(x, y)) / denominator
+                scale = max(y) - min(y)
+                normalized = 0.0 if scale == 0 else slope * max(1, len(y) - 1) / scale
+                direction = "increasing" if normalized > 0.1 else "decreasing" if normalized < -0.1 else "stable"
+                trends[column] = {
+                    "x": x_column, "slope": slope, "normalized_change": normalized, "direction": direction
+                }
         return trends
 
     def _groups(
         self,
         rows: list[dict[str, Any]],
-        columns: list[str],
         numeric: dict[str, list[tuple[int, float]]],
-    ) -> dict[str, Any]:
-        categorical = None
-        for column in columns:
-            if column in numeric:
+        specs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        for spec in specs:
+            if not isinstance(spec, dict):
                 continue
-            values = {str(row.get(column)).strip() for row in rows if not self._blank(row.get(column))}
-            if 1 < len(values) <= min(20, max(2, len(rows) // 2)):
-                categorical = column
-                break
-        if not categorical:
-            return {}
-        result: dict[str, Any] = {"group_column": categorical, "means": {}}
-        for numeric_column in list(numeric)[:8]:
-            grouped: dict[str, list[float]] = defaultdict(list)
-            for row in rows:
-                group = str(row.get(categorical) or "").strip()
-                value = self._number(row.get(numeric_column))
-                if group and value is not None:
-                    grouped[group].append(value)
-            result["means"][numeric_column] = {
-                group: {"count": len(values), "mean": statistics.mean(values)} for group, values in grouped.items()
-            }
-        return result
+            categorical = str(spec.get("group") or "").strip()
+            if categorical not in rows[0]:
+                raise ValueError(f"Group column does not exist: {categorical}")
+            measures = [str(item) for item in spec.get("measures") or []]
+            missing = [item for item in measures if item not in numeric]
+            if missing:
+                raise ValueError(f"Group measures are not numeric or were excluded: {', '.join(missing)}")
+            result: dict[str, Any] = {"group_column": categorical, "means": {}}
+            for numeric_column in measures:
+                grouped: dict[str, list[float]] = defaultdict(list)
+                for row in rows:
+                    group = str(row.get(categorical) or "").strip()
+                    value = self._number(row.get(numeric_column))
+                    if group and value is not None:
+                        grouped[group].append(value)
+                result["means"][numeric_column] = {
+                    group: {"count": len(values), "mean": statistics.mean(values)} for group, values in grouped.items()
+                }
+            results.append(result)
+        return results
 
-    def _charts(self, summaries: dict[str, Any], trends: dict[str, Any], groups: dict[str, Any]) -> list[str]:
-        charts = []
-        if summaries:
-            charts.append("Use box plots for numeric distributions and IQR outlier review.")
-        if trends:
-            charts.append("Use line charts for ordered measurements, epochs, steps, or time points.")
-        if groups:
-            charts.append(f"Use grouped bars or point-range plots by `{groups['group_column']}`.")
-        if len(summaries) >= 2:
-            charts.append("Use a scatter plot or correlation heatmap for relationships between numeric variables.")
-        return charts
+    def _schema(self, rows: list[dict[str, Any]], columns: list[str]) -> list[dict[str, Any]]:
+        schema = []
+        for column in columns:
+            values = [row.get(column) for row in rows if not self._blank(row.get(column))]
+            numeric_count = sum(self._number(value) is not None for value in values)
+            schema.append({
+                "name": column,
+                "nonblank_count": len(values),
+                "numeric_count": numeric_count,
+                "numeric_ratio": numeric_count / len(values) if values else 0,
+                "distinct_count": len({str(value) for value in values}),
+                "sample": [str(value) for value in values[:5]],
+            })
+        return schema
+
+    def _column_roles(self, raw: Any, columns: list[str]) -> dict[str, list[str]]:
+        source = raw if isinstance(raw, dict) else {}
+        roles = {
+            role: list(dict.fromkeys(str(item) for item in source.get(role, []) if str(item).strip()))
+            for role in ("identifiers", "order", "groups", "measures")
+        }
+        missing = [item for values in roles.values() for item in values if item not in columns]
+        if missing:
+            raise ValueError(f"Column roles reference missing columns: {', '.join(dict.fromkeys(missing))}")
+        return roles
+
+    def _chart_specs(self, raw: Any, columns: list[str]) -> list[dict[str, Any]]:
+        if not isinstance(raw, list):
+            raise ValueError("chart_specs must be a list")
+        specs = []
+        for item in raw:
+            if not isinstance(item, dict):
+                raise ValueError("Each chart specification must be an object")
+            requested = [str(item.get("x") or ""), str(item.get("group") or ""), *[str(v) for v in item.get("y") or []]]
+            missing = [value for value in requested if value and value not in columns]
+            if missing:
+                raise ValueError(f"Chart specification references missing columns: {', '.join(missing)}")
+            specs.append(dict(item))
+        return specs
+
+    def _render_charts(self, path: Path, specs: list[dict[str, Any]]) -> tuple[dict[str, str], list[dict[str, Any]]]:
+        service = ChartService(self.session_dir)
+        artifacts: dict[str, str] = {}
+        results: list[dict[str, Any]] = []
+        for spec in specs:
+            rendered = service.render({"path": str(path), **spec})
+            artifacts.update(rendered.get("artifacts") or {})
+            results.append(rendered.get("data") or {})
+        return artifacts, results
 
     def _report(self, payload: dict[str, Any]) -> str:
         lines = [
@@ -203,7 +298,7 @@ class ExperimentAnalysisService:
             "",
         ]
         if payload.get("id_like_columns"):
-            lines.extend(["## Identifier-like Columns", ""])
+            lines.extend(["## Identifier Columns From Analysis Plan", ""])
             lines.extend(f"- `{column}`" for column in payload["id_like_columns"])
             lines.extend([""])
         lines.extend(["## Numeric Summary", ""])
@@ -239,6 +334,3 @@ class ExperimentAnalysisService:
 
     def _blank(self, value: Any) -> bool:
         return value is None or str(value).strip() == ""
-
-    def _id_like(self, column: str) -> bool:
-        return bool(re.search(r"(^id$|subject|subj|被试|编号|trial|epoch|样本号)", column, re.IGNORECASE))

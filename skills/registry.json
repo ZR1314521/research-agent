@@ -13,7 +13,8 @@
       "kind": "tool",
       "handler": "search_literature",
       "planner_visible": true,
-      "description": "Search multiple scholarly sources, normalize results, screen them, and create a paper pool.",
+      "description": "Search multiple scholarly sources, normalize results, screen them, and create a paper pool. Omit optional result limits unless the user explicitly requested a count; the service applies its configured default.",
+      "batch_policy": "single",
       "network_access": true
     },
     {
@@ -199,6 +200,7 @@
       "kind": "tool",
       "handler": "rag_query",
       "planner_visible": true,
+      "direct_delivery": true,
       "description": "Build or query a local sparse TF-IDF research index."
     },
     {
@@ -206,7 +208,7 @@
       "kind": "internal",
       "handler": "search_literature",
       "planner_visible": false,
-      "description": "Bound repeated API search and query expansion to three rounds."
+      "description": "Bound repeated API search and query expansion using runtime configuration and evidence-based stop reasons."
     },
     {
       "name": "gbt7714-strict-rules",

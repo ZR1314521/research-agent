@@ -1,4 +1,8 @@
-param([switch]$DryRun)
+param(
+    [switch]$DryRun,
+    [ValidateRange(1024, 65535)]
+    [int]$ApiPort = 8878
+)
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -8,8 +12,8 @@ $Python = if (Test-Path -LiteralPath $ProjectPython) { $ProjectPython } else { $
 $Workbench = Join-Path $ProjectRoot "workbench"
 $ReactScripts = Join-Path $Workbench "node_modules\.bin\react-scripts.cmd"
 $Npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
-$ApiArgs = @("-m", "uvicorn", "research_agent.app:app", "--host", "127.0.0.1", "--port", "8877")
-$ApiBase = "http://127.0.0.1:8877"
+$ApiArgs = @("-m", "uvicorn", "research_agent.app:app", "--host", "127.0.0.1", "--port", "$ApiPort")
+$ApiBase = "http://127.0.0.1:$ApiPort"
 
 Write-Output "[api] $Python $($ApiArgs -join ' ')"
 Write-Output "[workbench] npm --prefix $Workbench start"
@@ -23,7 +27,7 @@ $ApiProcess = $null
 $WorkbenchProcess = $null
 $ReuseApi = $false
 
-$Listener = Get-NetTCPConnection -LocalPort 8877 -State Listen -ErrorAction SilentlyContinue
+$Listener = Get-NetTCPConnection -LocalPort $ApiPort -State Listen -ErrorAction SilentlyContinue
 if ($Listener) {
     $Compatible = $false
     try {
@@ -42,10 +46,10 @@ if ($Listener) {
     }
     if (-not $Compatible) {
         $OwnerIds = @($Listener | Select-Object -ExpandProperty OwningProcess -Unique) -join ", "
-        throw "Port 8877 is occupied by an incompatible or stale backend (PID: $OwnerIds). Close it and run this script again."
+        throw "Port $ApiPort is occupied by an incompatible or stale backend (PID: $OwnerIds). Close it or choose another -ApiPort."
     }
     $ReuseApi = $true
-    Write-Output "[api] compatible backend already running; reusing port 8877"
+    Write-Output "[api] compatible backend already running; reusing port $ApiPort"
 }
 
 try {
@@ -62,6 +66,7 @@ try {
         }
         if (-not $Ready) { throw "The backend did not become ready within 10 seconds." }
     }
+    $env:REACT_APP_API_BASE = $ApiBase
     $WorkbenchProcess = Start-Process -FilePath $Npm.Source -ArgumentList @("--prefix", $Workbench, "start") -WorkingDirectory $ProjectRoot -WindowStyle Hidden -PassThru
 } catch {
     if ($ApiProcess) { Stop-Process -Id $ApiProcess.Id -Force -ErrorAction SilentlyContinue }

@@ -43,6 +43,9 @@ class AgentConfig:
     llm_timeout_seconds: int
     llm_max_tokens: int
     llm_retry: int
+    structured_llm_timeout_seconds: int
+    structured_llm_max_tokens: int
+    structured_llm_retry: int
     provider_max_concurrency: int
     context_window: int
     context_budget: int
@@ -53,6 +56,13 @@ class AgentConfig:
     pubmed_email: str
     pubmed_api_key: str
     agent_emergency_turn_limit: int
+    literature_default_limit: int
+    literature_max_limit: int
+    literature_max_rounds: int
+    literature_max_requests_per_source: int
+    literature_request_delay_seconds: float
+    literature_max_batch_queries: int
+    literature_screening_limit: int
 
     @classmethod
     def load(cls, root_dir: Path | None = None) -> "AgentConfig":
@@ -74,6 +84,15 @@ class AgentConfig:
             # Zero omits max_tokens so the provider/model applies its native limit.
             llm_max_tokens=max(0, int(_value(values, "RESEARCH_AGENT_LLM_MAX_TOKENS", "0"))),
             llm_retry=max(0, min(5, int(_value(values, "RESEARCH_AGENT_LLM_RETRY", "0")))),
+            structured_llm_timeout_seconds=max(
+                5, int(_value(values, "RESEARCH_AGENT_STRUCTURED_LLM_TIMEOUT", "90"))
+            ),
+            structured_llm_max_tokens=max(
+                0, int(_value(values, "RESEARCH_AGENT_STRUCTURED_LLM_MAX_TOKENS", "4096"))
+            ),
+            structured_llm_retry=max(
+                0, min(5, int(_value(values, "RESEARCH_AGENT_STRUCTURED_LLM_RETRY", "0")))
+            ),
             provider_max_concurrency=max(
                 1, int(_value(values, "RESEARCH_AGENT_PROVIDER_MAX_CONCURRENCY", "1"))
             ),
@@ -98,6 +117,21 @@ class AgentConfig:
                     "RESEARCH_AGENT_EMERGENCY_TURN_LIMIT",
                     _value(values, "RESEARCH_AGENT_MAX_STEPS", "50"),
                 )),
+            ),
+            literature_default_limit=max(1, int(_value(values, "RESEARCH_AGENT_LITERATURE_DEFAULT_LIMIT", "12"))),
+            literature_max_limit=max(1, int(_value(values, "RESEARCH_AGENT_LITERATURE_MAX_LIMIT", "50"))),
+            literature_max_rounds=max(1, int(_value(values, "RESEARCH_AGENT_LITERATURE_MAX_ROUNDS", "3"))),
+            literature_max_requests_per_source=max(
+                1, int(_value(values, "RESEARCH_AGENT_LITERATURE_MAX_REQUESTS_PER_SOURCE", "10"))
+            ),
+            literature_request_delay_seconds=max(
+                0.0, float(_value(values, "RESEARCH_AGENT_LITERATURE_REQUEST_DELAY_SECONDS", "0.3"))
+            ),
+            literature_max_batch_queries=max(
+                1, int(_value(values, "RESEARCH_AGENT_LITERATURE_MAX_BATCH_QUERIES", "4"))
+            ),
+            literature_screening_limit=max(
+                1, int(_value(values, "RESEARCH_AGENT_LITERATURE_SCREENING_LIMIT", "20"))
             ),
         )
 

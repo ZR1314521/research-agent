@@ -6,6 +6,7 @@ import shutil
 import sqlite3
 import time
 import unittest
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -63,7 +64,7 @@ class PlatformFeatureTests(unittest.TestCase):
 
         self.assertTrue(created["has_credentials"])
         self.assertNotIn("password", created)
-        with sqlite3.connect(self.store.path) as db:
+        with closing(sqlite3.connect(self.store.path)) as db:
             secret = db.execute(
                 "SELECT secret_blob FROM data_sources WHERE id=?", (created["id"],)
             ).fetchone()[0]

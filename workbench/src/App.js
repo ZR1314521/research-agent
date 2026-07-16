@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import TopNav, { BrandMark } from "./components/TopNav";
 import ApprovalDock from "./components/ApprovalDock";
 import ArtifactList from "./components/ArtifactList";
+import ContextMeter from "./components/ContextMeter";
 import HomePage from "./pages/HomePage";
 import SettingsPage from "./pages/SettingsPage";
 import TaskCenterPage from "./pages/TaskCenterPage";
+import { applyTheme, loadTheme } from "./theme";
 
-const API = "http://127.0.0.1:8877";
+const API = String(process.env.REACT_APP_API_BASE || "http://127.0.0.1:8878").replace(/\/$/, "");
 const BUSY = new Set(["running", "pause_requested", "paused", "waiting_approval", "rate_limited"]);
 
 function initialPage() {
@@ -27,15 +31,37 @@ function fileName(path) {
   return String(path || "").split(/[\\/]/).pop() || path;
 }
 
+function WorkflowInspector({ runId, steps, artifacts, onClose }) {
+  return (
+    <aside className="run-inspector" aria-label="任务检查器">
+      <header><button type="button" className="inspector-close" onClick={onClose} aria-label="关闭任务详情">×</button><span>Task details</span><h2>任务轨迹</h2><p>这里只展示可理解的步骤与成果，不展示内部日志和模型原始数据。</p></header>
+      <section className="inspector-section">
+        <div className="inspector-heading"><h3>执行步骤</h3><span>{steps.length}</span></div>
+        <div className="inspector-steps">
+          {steps.map(step => <article key={step.id || `${step.skill}-${step.started_at}`} className={`inspector-step ${step.status}`}><i /><div><strong>{step.status === "running" ? "正在处理" : step.summary || "已完成步骤"}</strong><span>{step.status === "completed" ? "已完成" : step.status === "failed" ? "失败" : step.status === "cancelled" ? "已取消" : step.status === "running" ? "执行中" : "已排队"}</span></div></article>)}
+          {!steps.length && <p className="inspector-empty">尚未执行工具。对话与一般问答不会伪造工作流步骤。</p>}
+        </div>
+      </section>
+      <section className="inspector-section artifact-inspector">
+        <div className="inspector-heading"><h3>任务产物</h3><span>{Object.keys(artifacts || {}).length}</span></div>
+        <ArtifactList api={API} runId={runId} artifacts={artifacts} />
+        {!Object.keys(artifacts || {}).length && <p className="inspector-empty">产物生成后会在这里显示预览或文件路径。</p>}
+      </section>
+    </aside>
+  );
+}
+
 function WorkspacePage({
   runId, sessions, selectedSessions, setSelectedSessions, deleteMode, setDeleteMode,
-  onDeleteSessions, onNewRun, onSwitchSession, turnState, modelName, tokenUsage, tokenLimit,
+  onDeleteSessions, onNewRun, onSwitchSession, turnState, modelName, contextSize, contextWindow,
   control, messages, msgDeleteMode, selectedMsgs, setSelectedMsgs, onDeleteMessages,
   pendingApproval, resolveApproval, error, files, setFiles, upload, styleGroups,
   convertFormat, planActive, startTurn, message, setMessage, busy, activeTurnId, bottomRef,
+  artifacts, workflowSteps,
 }) {
   const activeSession = sessions.find(session => session.run_id === runId);
-  const usagePercent = Math.min(100, tokenUsage / Math.max(1, tokenLimit) * 100);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const detailCount = workflowSteps.length + Object.keys(artifacts || {}).length;
 
   return (
     <main className="workspace-page page-frame">
@@ -78,7 +104,8 @@ function WorkspacePage({
             <span className={`run-status status-${turnState}`}><i />{statusLabel(turnState)}</span>
           </div>
           <div className="workspace-header-actions">
-            {modelName && <div className="model-usage"><strong>{modelName}</strong><span><i style={{ width: `${usagePercent}%` }} /></span><small>{(tokenUsage / 1000).toFixed(1)}k / {(tokenLimit / 1000).toFixed(0)}k</small></div>}
+            <button type="button" className="task-details-button" onClick={() => setDetailsOpen(true)}>任务详情{detailCount ? ` ${detailCount}` : ""}</button>
+            <ContextMeter modelName={modelName} contextSize={contextSize} contextWindow={contextWindow} />
             <button type="button" onClick={() => control("pause")} disabled={turnState !== "running"}>Ⅱ 暂停</button>
             <button type="button" onClick={() => control("resume")} disabled={!(["paused", "rate_limited"].includes(turnState))}>▶ 恢复</button>
             <button type="button" className="danger-soft" onClick={() => control("cancel")} disabled={!BUSY.has(turnState)}>× 取消</button>
@@ -110,11 +137,16 @@ function WorkspacePage({
                 >
                   <header><span>{isUser ? "你" : item.role === "system" ? "系统" : "Research Agent"}</span>{msgDeleteMode && <i>{selected ? "✓ 已选择" : "点击选择"}</i>}</header>
                   {(item.steps || []).length > 0 && <div className="execution-steps">
-                    {(item.steps || []).map(step => <div key={step.key} className={`execution-step ${step.status}`}><span>{step.status === "running" ? "…" : step.status === "failed" ? "×" : "✓"}</span><p><strong>{step.tool}</strong>{step.summary && <small>{step.summary}</small>}</p></div>)}
+                    {(item.steps || []).map(step => <div key={step.key} className={`execution-step ${step.status}`}><span>{step.status === "running" ? "…" : step.status === "failed" ? "×" : "✓"}</span><p><strong>{step.status === "running" ? "正在处理" : step.summary || "步骤已完成"}</strong></p></div>)}
                   </div>}
-                  {item.content && <div className="message-content">{item.content}</div>}
+                  {item.content && (isUser || item.role === "system"
+                    ? <div className="message-content plain-message">{item.content}</div>
+                    : <ReactMarkdown
+                        className="message-content markdown-message"
+                        remarkPlugins={[remarkGfm]}
+                        components={{ a: props => <a {...props} target="_blank" rel="noreferrer" /> }}
+                      >{item.content}</ReactMarkdown>)}
                   {item.streaming && !item.content && !(item.steps || []).length && <div className="thinking-indicator"><i /><i /><i /><span>正在理解任务</span></div>}
-                  {(item.calls || []).length > 0 && <details className="call-details"><summary>模型调用 {(item.calls || []).length} 次</summary>{item.calls.map(call => <div key={call.call_id || `${call.operation}-${call.attempt}`}><span>{call.operation}</span><span>第 {call.attempt} 次</span><span>{call.status}</span></div>)}</details>}
                   <ArtifactList api={API} runId={runId} artifacts={item.artifacts} />
                 </article>
                 {isUser && <span className="message-avatar user-message-avatar"><i /></span>}
@@ -155,6 +187,8 @@ function WorkspacePage({
           <div className={`composer-meta ${turnState === "paused" ? "intervention-meta" : ""}`}><span>{turnState === "paused" ? "当前任务已暂停；下一条消息会调整任务并继续" : "Ctrl + Enter 发送"}</span>{activeTurnId && <span>Turn {activeTurnId.slice(0, 8)}</span>}</div>
         </section>
       </section>
+      {detailsOpen && <button type="button" className="inspector-backdrop" aria-label="关闭任务详情" onClick={() => setDetailsOpen(false)} />}
+      {detailsOpen && <WorkflowInspector runId={runId} steps={workflowSteps} artifacts={artifacts} onClose={() => setDetailsOpen(false)} />}
     </main>
   );
 }
@@ -170,6 +204,7 @@ export default function App() {
   const [msgDeleteMode, setMsgDeleteMode] = useState(false);
   const [selectedMsgs, setSelectedMsgs] = useState(new Set());
   const [artifacts, setArtifacts] = useState({});
+  const [workflowSteps, setWorkflowSteps] = useState([]);
   const [error, setError] = useState("");
   const [files, setFiles] = useState([]);
   const [turnState, setTurnState] = useState("idle");
@@ -179,8 +214,8 @@ export default function App() {
   const [styleGroups, setStyleGroups] = useState([]);
   const [apiVersion, setApiVersion] = useState("");
   const [modelName, setModelName] = useState("");
-  const [tokenUsage, setTokenUsage] = useState(0);
-  const [tokenLimit, setTokenLimit] = useState(1000000);
+  const [contextSize, setContextSize] = useState(0);
+  const [contextWindow, setContextWindow] = useState(0);
   const [account, setAccount] = useState(null);
   const abortRef = useRef(null);
   const runIdRef = useRef("");
@@ -192,13 +227,7 @@ export default function App() {
   const busy = BUSY.has(turnState);
 
   useEffect(() => {
-    try {
-      const colors = JSON.parse(localStorage.getItem("research-agent-theme-colors") || "null");
-      if (!colors) return;
-      const root = document.documentElement;
-      const variables = { page: "--page-bg", surface: "--cream-0", soft: "--sage-1", accent: "--sage-4", strong: "--sage-5", text: "--cocoa", muted: "--muted", line: "--line" };
-      Object.entries(variables).forEach(([key, variable]) => colors[key] && root.style.setProperty(variable, colors[key]));
-    } catch {}
+    applyTheme(loadTheme());
   }, []);
 
   const navigate = useCallback(next => {
@@ -230,6 +259,7 @@ export default function App() {
     fetch(`${API}/health`).then(response => response.json()).then(data => {
       if (data.version) setApiVersion(data.version);
       if (data.model) setModelName(data.model);
+      if (data.context_window !== undefined) setContextWindow(Math.max(0, Number(data.context_window) || 0));
     }).catch(() => {});
     fetch(`${API}/styles`).then(response => response.json()).then(setStyleGroups).catch(() => {});
     fetch(`${API}/settings/account`).then(response => response.json()).then(setAccount).catch(() => {});
@@ -245,11 +275,12 @@ export default function App() {
     }
     if (run.run_id) loadSessions();
     setArtifacts(run.artifacts || {});
-    if (run.context_size !== undefined) setTokenUsage(run.context_size);
-    if (run.window_size) setTokenLimit(run.window_size);
+    setWorkflowSteps(run.workflow_steps || []);
+    if (run.context_size !== undefined) setContextSize(Math.max(0, Number(run.context_size) || 0));
+    if (run.window_size !== undefined) setContextWindow(Math.max(0, Number(run.window_size) || 0));
     if (replaceMessages) {
       if (run.messages?.length) {
-        setMessages(run.messages.map(item => ({ role: item.role === "assistant" ? "agent" : item.role, content: item.content, steps: [], calls: [], artifacts: {} })));
+        setMessages(run.messages.map(item => ({ role: item.role === "assistant" ? "agent" : item.role, content: item.content, steps: [], artifacts: {} })));
       } else if (run.messages) setMessages([]);
     }
     const pending = ["tool_approval", "plan_approval"].includes(run.pending_action?.type) ? run.pending_action : null;
@@ -292,18 +323,32 @@ export default function App() {
     switch (event.event) {
       case "turn_started": setTurnState("running"); break;
       case "assistant_delta": updateAgent(agent => ({ ...agent, content: (agent.content || "") + (event.text || "") })); break;
-      case "provider_call_started":
-        updateAgent(agent => ({ ...agent, calls: [...(agent.calls || []), { call_id: event.call_id, operation: event.operation || "模型调用", attempt: event.attempt || 1, status: "running", started_at: event.timestamp }] })); break;
       case "provider_call_finished":
+        break;
       case "rate_limited":
-        updateAgent(agent => ({ ...agent, calls: (agent.calls || []).map(call => call.call_id === event.call_id ? { ...call, status: event.status || event.event, usage: event.usage || {}, error: event.error || "" } : call) }));
         if (event.event === "rate_limited") setTurnState("rate_limited");
         break;
       case "tool_started":
-        updateAgent(agent => ({ ...agent, steps: [...(agent.steps || []), { key: event.sequence, tool: event.tool || "工具", status: "running" }] })); break;
+        updateAgent(agent => ({ ...agent, steps: [...(agent.steps || []), { key: event.sequence, tool: event.tool || "工具", status: "running" }] }));
+        setWorkflowSteps(previous => [...previous, { id: `live-${event.sequence}`, skill: event.tool || "工具", status: "running", started_at: event.timestamp }]);
+        break;
       case "tool_result":
         updateAgent(agent => ({ ...agent, steps: [...(agent.steps || []).filter(step => !(step.tool === event.tool && step.status === "running")), { key: event.sequence, tool: event.tool || "工具", status: event.ok === false ? "failed" : "done", summary: event.message || "" }], artifacts: { ...(agent.artifacts || {}), ...(event.artifacts || {}) } }));
         setArtifacts(previous => ({ ...previous, ...(event.artifacts || {}) }));
+        setWorkflowSteps(previous => {
+          const next = [...previous];
+          let index = -1;
+          for (let cursor = next.length - 1; cursor >= 0; cursor -= 1) {
+            if (next[cursor].skill === (event.tool || "工具") && next[cursor].status === "running") {
+              index = cursor;
+              break;
+            }
+          }
+          const finished = { id: `live-${event.sequence}`, skill: event.tool || "工具", status: event.ok === false ? "failed" : "completed", summary: event.message || "", finished_at: event.timestamp };
+          if (index >= 0) next[index] = { ...next[index], ...finished };
+          else next.push(finished);
+          return next;
+        });
         break;
       case "pause_requested": setTurnState("pause_requested"); break;
       case "turn_paused": setTurnState("paused"); break;
@@ -311,12 +356,19 @@ export default function App() {
       case "turn_resumed": setTurnState("running"); break;
       case "approval_required": setTurnState("waiting_approval"); refreshRun(runId).catch(() => {}); break;
       case "turn_finished":
-        updateAgent(agent => ({ ...agent, content: agent.content || event.assistant_message || "", artifacts: event.artifacts || agent.artifacts || {}, streaming: false }));
+        updateAgent(agent => ({ ...agent, content: event.assistant_message || agent.content || "", artifacts: event.artifacts || agent.artifacts || {}, streaming: false }));
+        if (event.context_size !== undefined) setContextSize(Math.max(0, Number(event.context_size) || 0));
         setArtifacts(event.artifacts || {}); setPendingApproval(null); setTurnState("completed"); setActiveTurnId("");
-        if (event.context_size !== undefined) setTokenUsage(event.context_size);
         refreshRun(runId, { replaceMessages: false }).catch(() => {}); break;
-      case "turn_failed": updateAgent(agent => ({ ...agent, streaming: false })); setError(event.error || "任务执行失败，但已经完成的成果仍然保留。"); setTurnState("failed"); setActiveTurnId(""); break;
-      case "turn_cancelled": updateAgent(agent => ({ ...agent, streaming: false })); setTurnState("cancelled"); setActiveTurnId(""); break;
+      case "turn_failed": updateAgent(agent => ({ ...agent, streaming: false })); setWorkflowSteps(previous => previous.map(step => step.status === "running" ? { ...step, status: "failed" } : step)); setError(event.error || "任务执行失败，但已经完成的成果仍然保留。"); setTurnState("failed"); setActiveTurnId(""); refreshRun(runId, { replaceMessages: false }).catch(() => {}); break;
+      case "turn_cancelled":
+        updateAgent(agent => {
+          const notice = event.message || "任务已停止。已完成的步骤和成果均已保留。";
+          const content = (agent.content || "").trim();
+          return { ...agent, content: content.includes(notice) ? content : `${content}${content ? "\n\n" : ""}${notice}`, streaming: false };
+        });
+        setWorkflowSteps(previous => previous.map(step => step.status === "running" ? { ...step, status: "cancelled" } : step));
+        setTurnState("cancelled"); setActiveTurnId(""); refreshRun(runId, { replaceMessages: false }).catch(() => {}); break;
       default: break;
     }
   }, [refreshRun, runId, updateAgent]);
@@ -345,7 +397,7 @@ export default function App() {
     const controller = new AbortController();
     abortRef.current = controller; sequenceRef.current = 0; turnIdRef.current = selectedTurnId;
     setActiveTurnId(selectedTurnId); setTurnState(run.active_turn.status || "running");
-    setMessages(previous => [...previous, { role: "agent", content: "", steps: [], calls: [], artifacts: {}, streaming: true }]);
+    setMessages(previous => [...previous, { role: "agent", content: "", steps: [], artifacts: {}, streaming: true }]);
     try {
       const response = await fetch(`${API}/runs/${encodeURIComponent(selectedRunId)}/turns/${encodeURIComponent(selectedTurnId)}/events?after=0`, { signal: controller.signal });
       await consume(response, generation);
@@ -398,7 +450,7 @@ export default function App() {
               break;
             }
           }
-          return [...next, { role: "user", content: value }, { role: "agent", content: "", steps: [], calls: [], artifacts: {}, streaming: true }];
+          return [...next, { role: "user", content: value }, { role: "agent", content: "", steps: [], artifacts: {}, streaming: true }];
         });
         setMessage(""); setTurnState("running"); scrollDown();
       } catch (eventError) {
@@ -408,7 +460,7 @@ export default function App() {
     }
     const generation = generationRef.current; const controller = new AbortController();
     abortRef.current = controller; sequenceRef.current = 0; setError(""); setTurnState("running"); setPendingApproval(null);
-    setMessages(previous => [...previous, ...(showUser ? [{ role: "user", content: value }] : []), { role: "agent", content: "", steps: [], calls: [], artifacts: {}, streaming: true }]);
+    setMessages(previous => [...previous, ...(showUser ? [{ role: "user", content: value }] : []), { role: "agent", content: "", steps: [], artifacts: {}, streaming: true }]);
     if (showUser) setMessage(""); scrollDown();
     try {
       const response = await fetch(`${API}/runs/${encodeURIComponent(runId)}/turns/stream`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: value }), signal: controller.signal });
@@ -431,14 +483,15 @@ export default function App() {
     if (id === runIdRef.current) return;
     generationRef.current += 1; runIdRef.current = id;
     abortRef.current?.abort(); abortRef.current = null; setRunId(id);
-    setMessages([]); setArtifacts({}); setError(""); setPendingApproval(null); setPlanActive(false);
+    setMessages([]); setArtifacts({}); setWorkflowSteps([]); setError(""); setPendingApproval(null); setPlanActive(false);
+    setContextSize(0);
     setTurnState("idle"); setActiveTurnId(""); sequenceRef.current = 0; turnIdRef.current = "";
   };
 
   const newRun = useCallback(async () => {
     generationRef.current += 1; const generation = generationRef.current;
     abortRef.current?.abort(); abortRef.current = null;
-    setError(""); setMessages([]); setArtifacts({}); setFiles([]); setPendingApproval(null); setPlanActive(false); setTurnState("idle"); setActiveTurnId(""); sequenceRef.current = 0; turnIdRef.current = "";
+    setError(""); setMessages([]); setArtifacts({}); setWorkflowSteps([]); setFiles([]); setPendingApproval(null); setPlanActive(false); setTurnState("idle"); setActiveTurnId(""); sequenceRef.current = 0; turnIdRef.current = "";
     try {
       const response = await fetch(`${API}/runs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ run_id: "" }) });
       if (!response.ok) throw new Error((await response.json()).detail || response.statusText);
@@ -468,13 +521,13 @@ export default function App() {
         const response = await fetch(`${API}/runs/${encodeURIComponent(runId)}/reject`, { method: "POST" });
         if (!response.ok) throw new Error((await response.json()).detail || response.statusText);
         const data = await response.json(); applyRun(data);
-        if (data.assistant_message) setMessages(previous => [...previous, { role: "agent", content: data.assistant_message, steps: [], calls: [], artifacts: data.artifacts || {}, streaming: false }]);
+        if (data.assistant_message) setMessages(previous => [...previous, { role: "agent", content: data.assistant_message, steps: [], artifacts: data.artifacts || {}, streaming: false }]);
         return;
       }
       const response = await fetch(`${API}/runs/${encodeURIComponent(runId)}/approve`, { method: "POST" });
       if (!response.ok) throw new Error((await response.json()).detail || response.statusText);
       const data = await response.json(); applyRun(data);
-      setMessages(previous => [...previous, { role: "agent", content: data.assistant_message || "操作已完成。", steps: (data.events || []).filter(event => event.event === "tool_observed").map(event => ({ key: event.sequence, tool: event.skill || "", status: "done", summary: (event.summary || "").slice(0, 200) })), calls: [], artifacts: data.artifacts || {}, streaming: false }]);
+      setMessages(previous => [...previous, { role: "agent", content: data.assistant_message || "操作已完成。", steps: (data.events || []).filter(event => event.event === "tool_observed").map(event => ({ key: event.sequence, tool: event.skill || "", status: "done", summary: (event.summary || "").slice(0, 200) })), artifacts: data.artifacts || {}, streaming: false }]);
     } catch (eventError) {
       setError(eventError.message); setTurnState("idle");
     } finally {
@@ -492,7 +545,7 @@ export default function App() {
       if (!response.ok) throw new Error((await response.json()).detail || response.statusText);
       const result = await response.json(); applyRun(result); setFiles([]); form.reset();
       const names = Object.values(result.artifacts || {}).map(value => fileName(typeof value === "string" ? value : value.path || "")).filter(Boolean).join("、");
-      setMessages(previous => [...previous, { role: "system", content: `已上传：${names}`, steps: [], calls: [], artifacts: result.artifacts || {} }]);
+      setMessages(previous => [...previous, { role: "system", content: `已上传：${names}`, steps: [], artifacts: result.artifacts || {} }]);
     } catch (eventError) { setError(eventError.message); }
   };
 
@@ -534,12 +587,12 @@ export default function App() {
         {page === "workspace" && <WorkspacePage
           runId={runId} sessions={sessions} selectedSessions={selectedSessions} setSelectedSessions={setSelectedSessions}
           deleteMode={deleteMode} setDeleteMode={setDeleteMode} onDeleteSessions={deleteSessions} onNewRun={newRun}
-          onSwitchSession={switchSession} turnState={turnState} modelName={modelName} tokenUsage={tokenUsage}
-          tokenLimit={tokenLimit} control={control} messages={messages} msgDeleteMode={msgDeleteMode}
+              onSwitchSession={switchSession} turnState={turnState} modelName={modelName} contextSize={contextSize} contextWindow={contextWindow} control={control} messages={messages} msgDeleteMode={msgDeleteMode}
           selectedMsgs={selectedMsgs} setSelectedMsgs={setSelectedMsgs} onDeleteMessages={deleteMessages}
           pendingApproval={pendingApproval} resolveApproval={resolveApproval} error={error} files={files} setFiles={setFiles}
           upload={upload} styleGroups={styleGroups} convertFormat={convertFormat} planActive={planActive} startTurn={startTurn}
           message={message} setMessage={setMessage} busy={busy} activeTurnId={activeTurnId} bottomRef={bottomRef}
+              artifacts={artifacts} workflowSteps={workflowSteps}
         />}
         {page === "tasks" && <TaskCenterPage api={API} sessions={sessions} onOpen={openTask} onRefresh={loadSessions} />}
         {page === "settings" && <SettingsPage api={API} onAccountChange={setAccount} />}

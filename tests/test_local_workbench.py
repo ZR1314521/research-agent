@@ -42,13 +42,29 @@ class LocalWorkbenchApiTests(unittest.TestCase):
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(payload["bind_host"], "127.0.0.1")
         self.assertFalse(payload["public_network"])
+        self.assertNotIn("turn_budget", payload)
+
+    def test_setup_no_longer_accepts_fixed_turn_budget_fields(self) -> None:
+        response = self.client.post("/setup/apply", json={
+            "turn_max_model_calls": 8,
+            "turn_max_tokens": 64000,
+        })
+
+        self.assertEqual(response.status_code, 400, response.text)
+        env_path = self.tmp / ".env"
+        env_text = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
+        self.assertNotIn("RESEARCH_AGENT_TURN_MAX_MODEL_CALLS", env_text)
+        self.assertNotIn("RESEARCH_AGENT_TURN_MAX_TOKENS", env_text)
 
     def test_create_message_and_sse_event_contracts(self) -> None:
         created_response = self.client.post("/runs", json={})
         self.assertEqual(created_response.status_code, 200)
         created = created_response.json()
         run_id = created["run_id"]
-        self.assertEqual(created["status"], "active")
+        self.assertEqual(created["status"], "idle")
+        self.assertNotIn("budget", created)
+        self.assertEqual(created["session_status"], "active")
+        self.assertIsNone(created["progress"])
 
         replied_response = self.client.post(f"/runs/{run_id}/messages", json={"message": "Hello"})
         self.assertEqual(replied_response.status_code, 200)
@@ -91,6 +107,57 @@ class LocalWorkbenchApiTests(unittest.TestCase):
         self.assertTrue(any(item["event"] == "tool_observed" for item in payload["events"]))
         sequences = [item["sequence"] for item in payload["events"]]
         self.assertEqual(sequences, list(dict.fromkeys(sequences)))
+
+    def test_idle_sessions_are_not_reported_as_running_tasks(self) -> None:
+        run_id = self.client.post("/runs", json={}).json()["run_id"]
+
+        sessions = self.client.get("/sessions").json()
+        row = next(item for item in sessions if item["run_id"] == run_id)
+
+        self.assertEqual(row["status"], "idle")
+        self.assertIsNone(row["progress"])
+
+    def test_run_payload_reconstructs_generic_workflow_from_persisted_events(self) -> None:
+        run_id = self.client.post("/runs", json={}).json()["run_id"]
+        session = self.agent.sessions.load(run_id)
+        self.agent.sessions.event(session, "tool_requested", "workspace-files", arguments={"path": "."}, turn=1)
+        self.agent.sessions.event(session, "tool_started", "workspace-files", "tool execution started", turn=1)
+        self.agent.sessions.event(session, "tool_observed", "workspace-files", "3 files", ok=True, turn=1)
+
+        payload = self.client.get(f"/runs/{run_id}").json()
+
+        self.assertEqual(len(payload["workflow_steps"]), 1)
+        step = payload["workflow_steps"][0]
+        self.assertEqual(step["skill"], "workspace-files")
+        self.assertEqual(step["status"], "completed")
+        self.assertEqual(step["summary"], "3 files")
+
+    def test_cancelled_run_does_not_leave_a_persisted_step_running(self) -> None:
+        run_id = self.client.post("/runs", json={}).json()["run_id"]
+        session = self.agent.sessions.load(run_id)
+        self.agent.sessions.event(session, "tool_requested", "academic-search-multisource", turn=1)
+        self.agent.sessions.event(session, "tool_started", "academic-search-multisource", turn=1)
+        self.agent.sessions.event(session, "cancelled", "academic-search-multisource", "user cancelled")
+
+        step = self.client.get(f"/runs/{run_id}").json()["workflow_steps"][0]
+
+        self.assertEqual(step["status"], "cancelled")
+
+    def test_cancel_endpoint_persists_cancelled_public_status_immediately(self) -> None:
+        run_id = self.client.post("/runs", json={}).json()["run_id"]
+        coordinator = self.client.app.state.turn_coordinator
+        control = TurnControl(run_id, self.agent.sessions.directory(run_id))
+        control.state = "running"
+        coordinator._active[run_id] = control
+        coordinator._turns[control.turn_id] = control
+
+        cancelled = self.client.post(f"/runs/{run_id}/cancel")
+        snapshot = self.client.get(f"/runs/{run_id}").json()
+
+        self.assertEqual(cancelled.status_code, 200)
+        self.assertTrue(cancelled.json()["cancelled"])
+        self.assertEqual(snapshot["status"], "cancelled")
+        self.assertEqual(snapshot["pending_action"]["type"], "cancelled")
 
     def test_registered_artifact_can_be_opened_by_name(self) -> None:
         run_id = self.client.post("/runs", json={}).json()["run_id"]

@@ -4,6 +4,7 @@ import json
 import shutil
 import sqlite3
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -61,7 +62,7 @@ class RunStoreTests(unittest.TestCase):
                 redactions=[secret],
                 snapshot={"authorization": f"Bearer {secret}", "nested": [secret]},
             )
-        with sqlite3.connect(runs_dir / "run_store.sqlite3") as connection:
+        with closing(sqlite3.connect(runs_dir / "run_store.sqlite3")) as connection:
             event_json = connection.execute("SELECT payload_json FROM events WHERE run_id = ?", ("run-1",)).fetchone()[0]
             snapshot_json = connection.execute("SELECT payload_json FROM snapshots WHERE run_id = ?", ("run-1",)).fetchone()[0]
         self.assertNotIn(secret, event_json)

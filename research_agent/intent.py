@@ -184,7 +184,7 @@ class IntentParser:
         if intent.has("literature_search") and re.search(r"最好|最好的", intent.raw) and not intent.sort_by:
             intent.reply = "“最好”可以按高被引、顶刊或主题相关度排序。请指定一个标准，或说“按高被引”。"
         if intent.has("literature_search") and re.search(r"最新|别太老", intent.raw) and not intent.query:
-            intent.reply = "我可以默认检索近 3 年公开文献。请补充研究主题，例如“抑郁症 EEG”。"
+            intent.reply = "我可以默认检索近 3 年公开文献。请补充研究主题，例如具体的研究对象、问题或方法。"
 
     def _is_search(self, text: str) -> bool:
         if re.search(r"找|搜|检索|查找|推荐|有哪些|search|find", text, re.IGNORECASE) and re.search(r"论文|文献|paper|literature", text, re.IGNORECASE):
@@ -195,7 +195,6 @@ class IntentParser:
         return bool(
             artifacts.get("active_papers")
             and re.search(r"必须|同时含|排除|不要|只要|边缘|筛|删掉|不相关|保留|纳入", text)
-            and re.search(r"cnn|eeg|mdd|alzheimer|综述|预印本|文献|论文|review|preprint", text, re.IGNORECASE)
         )
 
     def _is_matrix(self, text: str, artifacts: dict[str, str]) -> bool:
@@ -307,14 +306,11 @@ class IntentParser:
         match = re.search(r"必须(?:同时)?含\s*([^，。；;]+)", text, re.IGNORECASE)
         if match:
             result.extend(re.findall(r"[A-Za-z][A-Za-z0-9+/-]*|[\u4e00-\u9fff]{2,}", match.group(1)))
-        for marker, value in (("抑郁", "MDD"), ("脑电", "EEG")):
-            if marker in text and value not in result:
+        ignored = self.LATIN_STOPWORDS | set(self.SOURCE_MAP) | {item.lower() for item in self.VENUES} | set(self.STYLE_MAP)
+        for value in re.findall(r"(?<![A-Za-z0-9])[A-Za-z][A-Za-z0-9+/-]*", text):
+            if value.lower() not in ignored and value not in result:
                 result.append(value)
-        for value in re.findall(r"\b(CNN|EEG|MDD|BCI|Transformer|LSTM)\b", text, re.IGNORECASE):
-            normalized = value.upper() if value.lower() not in {"transformer"} else "Transformer"
-            if normalized not in result:
-                result.append(normalized)
-        return result
+        return list(dict.fromkeys(result))
 
     def _exclude(self, text: str) -> list[str]:
         result: list[str] = []
@@ -357,10 +353,6 @@ class IntentParser:
             if lower in self.STYLE_MAP:
                 continue
             terms.append(token)
-        if "抑郁" in text and not any(item.lower() in {"mdd", "depression", "depressive"} for item in terms):
-            terms.extend(["depression", "MDD"])
-        if "脑电" in text and not any(item.lower() == "eeg" for item in terms):
-            terms.append("EEG")
         if terms:
             return " ".join(dict.fromkeys(terms))
         cleaned = re.sub(

@@ -151,6 +151,14 @@ class AcceptanceTests(unittest.TestCase):
                 "precise": True,
             }),
             model_text("筛选完成。"),
+            generated=json.dumps({
+                "papers": [
+                    {"id": "p0", "decision": "include", "score": 95, "reasons": ["all required concepts present"], "matched_requirements": ["CNN", "EEG", "MDD"]},
+                    {"id": "p1", "decision": "exclude", "score": 2, "reasons": ["excluded review and Alzheimer topic"], "exclusion_reason": "excluded_study_type_and_topic"},
+                    {"id": "p2", "decision": "edge", "score": 12, "reasons": ["depression cohort is explicitly absent"], "missing_requirements": ["MDD"], "exclusion_reason": "needs_human_review"},
+                ],
+                "next_query": "", "stop": True, "stop_reason": "criteria_resolved",
+            }),
         )
         self.assertEqual(response.skill, "literature-screening")
         active = json.loads(Path(response.session.artifacts["active_papers"]).read_text(encoding="utf-8"))
@@ -162,7 +170,17 @@ class AcceptanceTests(unittest.TestCase):
     def test_source_budget_and_429_cooldown_are_logged(self) -> None:
         FakeSearchClient.calls = {}
         service = LiteratureService(self.config, self.tmp / "rate")
-        with patch.object(LiteratureService, "_client", side_effect=fake_client):
+        assessment = model_text(json.dumps({
+            "papers": [
+                {"id": "p0", "decision": "include", "score": 95, "reasons": ["matches"]},
+                {"id": "p1", "decision": "exclude", "score": 2, "reasons": ["excluded"], "exclusion_reason": "excluded"},
+                {"id": "p2", "decision": "edge", "score": 10, "reasons": ["insufficient"], "exclusion_reason": "needs_review"},
+            ],
+            "next_query": "CNN EEG MDD biomarkers", "stop": False,
+        }))
+        with patch.object(LiteratureService, "_client", side_effect=fake_client), patch.object(
+            service.client, "complete", return_value=assessment
+        ):
             result = service.search(
                 {
                     "query": "CNN EEG MDD",
@@ -288,7 +306,10 @@ class AcceptanceTests(unittest.TestCase):
         response = self.model_handle(
             session, "分析我刚刚上传的数据，按组比较，标异常但别删除，看 accuracy 和 loss 趋势",
             model_tool("experiment-data-analysis", {
-                "path": session.artifacts["latest_data"], "group_column": "group", "metrics": ["accuracy", "loss"],
+                "path": session.artifacts["latest_data"],
+                "column_roles": {"identifiers": ["subject", "trial"], "order": ["trial"], "groups": ["group"], "measures": ["accuracy", "loss"]},
+                "trend_specs": [{"x": "trial", "y": ["accuracy", "loss"]}],
+                "group_specs": [{"group": "group", "measures": ["accuracy", "loss"]}],
             }),
             model_text("数据分析完成。"),
         )
@@ -298,7 +319,7 @@ class AcceptanceTests(unittest.TestCase):
         self.assertIn("subject", summary["id_like_columns"])
         response = self.model_handle(
             session, "把刚才数据归一化后另存 CSV，不要覆盖原文件",
-            model_tool("data-transform", {"path": session.artifacts["latest_data"], "ops": ["normalize"]}),
+            model_tool("data-transform", {"path": session.artifacts["latest_data"], "ops": ["normalize"], "scale_columns": ["accuracy", "loss"]}),
             model_text("归一化副本已保存。"),
         )
         self.assertEqual(response.skill, "data-transform")

@@ -8,14 +8,17 @@ from typing import Any, Callable
 
 from research_agent.config import AgentConfig
 from research_agent.context import ContextManager
-from research_agent.core.contracts import ContractError, register_artifacts
+from research_agent.core.contracts import ContractError, public_artifacts, register_artifacts
 from research_agent.core.prompt_runtime import PromptRuntime
 from research_agent.executor import ToolExecutor
 from research_agent.logging import ModelCallLogger
 from research_agent.session import ChatSession, SessionStore
 from research_agent.skill_registry import SkillRegistry
 from research_agent.tools.llm_client import LLMClient
-from research_agent.provider_runtime import ProviderEvent, call_context
+from research_agent.provider_runtime import (
+    ProviderEvent,
+    call_context,
+)
 
 
 Progress = Callable[[str, str], None]
@@ -35,6 +38,8 @@ class LoopState:
     seen_calls: set[str] = field(default_factory=set)
     rejected_repeats: set[str] = field(default_factory=set)
     last_call_id: str = ""
+    answer_ready: bool = False
+    completion_guidance: str = ""
 
 
 class AgentLoop:
@@ -75,6 +80,9 @@ class AgentLoop:
         return self._drive(session, self._conversation(session, user_message), user_message, LoopState())
 
     def resume(self, session: ChatSession, approved: bool) -> AgentResult:
+        return self._resume(session, approved)
+
+    def _resume(self, session: ChatSession, approved: bool) -> AgentResult:
         pending = session.pending_action or {}
         pending_type = pending.get("type")
         if pending_type not in {"tool_approval", "plan_approval"}:
@@ -151,7 +159,7 @@ class AgentLoop:
         user_message: str,
         state: LoopState,
     ) -> AgentResult:
-        tools = self.prompts.tools_for_llm(read_only=(session.status == "planning"))
+        base_tools = self.prompts.tools_for_llm(read_only=(session.status == "planning"))
         turn = 0
         while True:
             turn += 1
@@ -172,7 +180,15 @@ class AgentLoop:
                     self.sessions.event(session, "intervention_applied", summary=user_message[:300])
                     self.sessions.save(session)
 
+            tools = [] if state.answer_ready else base_tools
             system = self.prompts.system(session)
+            if state.answer_ready:
+                system += (
+                    "\n\nThe latest successful tool result declares that enough evidence is available. "
+                    "Answer the user's current request now from the supplied observation. Do not request, "
+                    "read, or search for more material. "
+                    + (state.completion_guidance or "")
+                )
             messages = self.context.fit_to_budget(
                 messages,
                 summarizer=lambda older: self._summarize_older(older),
@@ -263,6 +279,7 @@ class AgentLoop:
             self.event_sink(ProviderEvent("tool_batch_started", {"count": len(raw_calls), "turn": turn}))
         direct_messages: list[str] = []
         all_direct_delivery = bool(raw_calls)
+        batch_seen: set[str] = set()
         for raw_call in raw_calls:
             call_id = str(raw_call.get("id") or f"tool-{turn or 1}")
             function = raw_call.get("function") if isinstance(raw_call.get("function"), dict) else {}
@@ -282,6 +299,21 @@ class AgentLoop:
                 all_direct_delivery = False
                 self._append_tool_message(messages, call_id, {"ok": False, "error": f"Tool is not executable: {spec.name}"})
                 continue
+            if spec.batch_policy == "single" and spec.name in batch_seen:
+                all_direct_delivery = False
+                payload = {
+                    "ok": False,
+                    "tool": spec.name,
+                    "error": "This tool accepts one call per assistant response. Reuse the completed observation or combine related inputs into one call.",
+                    "error_code": "batch_policy",
+                }
+                self.sessions.event(
+                    session, "tool_skipped", spec.name, payload["error"],
+                    ok=False, error_code="batch_policy", turn=turn,
+                )
+                self._append_tool_message(messages, call_id, payload)
+                continue
+            batch_seen.add(spec.name)
             if not spec.direct_delivery:
                 all_direct_delivery = False
 
@@ -351,14 +383,23 @@ class AgentLoop:
                 return self._cancelled(session, spec.name, messages)
             session.artifacts.update({key: str(value) for key, value in tool_result.get("artifacts", {}).items()})
             register_artifacts(session, spec, tool_result.get("artifacts", {}))
+            visible_artifacts = public_artifacts({
+                key: session.artifact_records[key]
+                for key in tool_result.get("artifacts", {})
+                if key in session.artifact_records
+            })
             for key in tool_result.get("artifacts", {}):
                 session.artifact_dependencies[key] = [spec.name]
             session.metadata["last_skill"] = spec.name
+            model_data = tool_result.get("model_data", tool_result.get("data", {}))
+            if isinstance(model_data, dict) and model_data.get("answer_ready") is True:
+                state.answer_ready = True
+                state.completion_guidance = str(model_data.get("completion_guidance") or "").strip()
             full_observation = {
                 "ok": True,
                 "tool": spec.name,
                 "message": str(tool_result.get("message") or ""),
-                "data": tool_result.get("data", {}),
+                "data": model_data,
                 "artifacts": tool_result.get("artifacts", {}),
             }
             observation = self.context.observation(
@@ -373,11 +414,14 @@ class AgentLoop:
             state.last_success = full_observation["message"] or state.last_success
             if spec.direct_delivery and full_observation["message"]:
                 direct_messages.append(full_observation["message"])
-            self.sessions.event(session, "tool_observed", spec.name, full_observation["message"], artifacts=full_observation["artifacts"], ok=True, turn=turn)
+            progress = tool_result.get("progress") if isinstance(tool_result.get("progress"), dict) else {}
+            public_message = str(progress.get("summary") or "步骤已完成")
+            self.sessions.event(session, "tool_observed", spec.name, public_message, artifacts=visible_artifacts, ok=True, turn=turn, metrics=dict(progress.get("metrics") or {}))
             if self.event_sink:
                 self.event_sink(ProviderEvent("tool_result", {
-                    "tool": spec.name, "ok": True, "message": full_observation["message"],
-                    "artifacts": full_observation["artifacts"], "turn": turn,
+                    "tool": spec.name, "ok": True, "message": public_message,
+                    "artifacts": visible_artifacts, "turn": turn,
+                    "metrics": dict(progress.get("metrics") or {}),
                 }))
             if self.progress:
                 self.progress("done", spec.name)
