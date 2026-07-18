@@ -94,7 +94,7 @@ class AgentConfig:
                 0, min(5, int(_value(values, "RESEARCH_AGENT_STRUCTURED_LLM_RETRY", "0")))
             ),
             provider_max_concurrency=max(
-                1, int(_value(values, "RESEARCH_AGENT_PROVIDER_MAX_CONCURRENCY", "1"))
+                1, int(_value(values, "RESEARCH_AGENT_PROVIDER_MAX_CONCURRENCY", "5"))
             ),
             context_window=max(0, int(_value(values, "RESEARCH_AGENT_CONTEXT_WINDOW", "0"))),
             context_budget=max(0, int(_value(values, "RESEARCH_AGENT_CONTEXT_BUDGET", "32000"))),

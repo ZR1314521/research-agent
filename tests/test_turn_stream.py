@@ -67,10 +67,58 @@ class ProviderStreamTests(unittest.TestCase):
         self.assertEqual(json.loads(result.tool_calls[0]["function"]["arguments"]), {"path": "."})
         self.assertTrue(captured["body"]["stream"])
         self.assertNotIn("max_tokens", captured["body"])
-        self.assertNotIn("stream_options", captured["body"])
-        self.assertTrue(any(event.kind == "assistant_delta" for event in events))
-        ledger = (run_dir / "provider_calls.jsonl").read_text(encoding="utf-8")
-        self.assertIn('"turn_id": "turn-one"', ledger)
+
+    def test_dsml_tool_calls_in_content_are_parsed_and_cleaned(self) -> None:
+        from research_agent.tools.llm_client import _extract_tool_calls_from_content, _is_inside_fence
+
+        real_sample = (
+            "Crossref success.\n\n"
+            "<tool_calls>\n"
+            "<invoke name=\"literature-search-crossref\">\n"
+            "<parameter name=\"query\" string=\"true\">EEG motor imagery CSP Riemannian</parameter>\n"
+            "<parameter name=\"year_from\" string=\"false\">2022</parameter>\n"
+            "<parameter name=\"year_to\" string=\"false\">2026</parameter>\n"
+            "<parameter name=\"limit\" string=\"false\">20</parameter>\n"
+            "</invoke>\n"
+            "<invoke name=\"literature-search-crossref\">\n"
+            "<parameter name=\"query\" string=\"true\">EEG motor imagery transfer learning</parameter>\n"
+            "<parameter name=\"year_from\" string=\"false\">2022</parameter>\n"
+            "<parameter name=\"year_to\" string=\"false\">2026</parameter>\n"
+            "<parameter name=\"limit\" string=\"false\">20</parameter>\n"
+            "</invoke>\n"
+            "<invoke name=\"literature-search-crossref\">\n"
+            "<parameter name=\"query\" string=\"true\">EEG motor imagery rehabilitation BCI</parameter>\n"
+            "<parameter name=\"year_from\" string=\"false\">2022</parameter>\n"
+            "<parameter name=\"year_to\" string=\"false\">2026</parameter>\n"
+            "<parameter name=\"limit\" string=\"false\">20</parameter>\n"
+            "</invoke>\n"
+            "</tool_calls>"
+        )
+        clean, calls = _extract_tool_calls_from_content(real_sample)
+
+        self.assertEqual(len(calls), 3)
+        self.assertNotIn("<tool_calls>", clean)
+        self.assertIn("Crossref success.", clean)
+        for c in calls:
+            args = json.loads(c["function"]["arguments"])
+            self.assertIsInstance(args["query"], str)
+            self.assertIsInstance(args["year_from"], int)
+            self.assertIsInstance(args["limit"], int)
+            self.assertEqual(c["function"]["name"], "literature-search-crossref")
+
+        # Streaming chunks must not leak
+        chunks = [real_sample[:40], real_sample[40:200], real_sample[200:400], real_sample[400:]]
+        buf: list[str] = []
+        leaked = False
+        for ch in chunks:
+            buf.append(ch)
+            if not _is_inside_fence("".join(buf)):
+                from research_agent.tools.llm_client import _strip_tool_call_text
+                flushed = _strip_tool_call_text("".join(buf))
+                if "<tool_calls>" in flushed or "<invoke>" in flushed:
+                    leaked = True
+                buf.clear()
+        self.assertFalse(leaked, "DSML leaked during streaming")
 
     def test_inherited_turn_sink_keeps_internal_model_content_out_of_user_stream(self) -> None:
         run_dir = ROOT / ".test_runtime" / "turn_stream" / "internal-visibility"

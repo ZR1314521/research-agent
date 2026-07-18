@@ -336,6 +336,16 @@
       "handler": "shell",
       "planner_visible": true,
       "description": "Run a shell command and return stdout, stderr, and exit code. Use for system tasks, file operations, or any CLI tool."
+    },
+    {
+      "name": "officecli",
+      "kind": "tool",
+      "handler": "officecli",
+      "planner_visible": true,
+      "description": "Create, read, edit, and validate Office documents (.docx, .xlsx, .pptx) via officecli. Single binary, no Office installation required. Consult the officecli SKILL.md for full capability reference.",
+      "write_access": true,
+      "direct_delivery": true,
+      "batch_policy": "single"
     }
   ]
 }

@@ -75,32 +75,34 @@ class WritingService:
             for index, paper in enumerate(papers, 1)
         ]
         instruction = (
-            "Return one valid JSON array with one item per input index. For every field abstract_summary, "
+            "Return one valid JSON array with one item. For every field abstract_summary, "
             "research_question, method, dataset, innovation, key_findings, conclusion, and limitations, return an "
             "object {status: reported|not_reported, value: string, evidence_quote: exact substring from that paper's "
             "abstract}. A reported value without an exact supporting quote is invalid. Do not infer absent facts."
         )
-        evidence = self.context.fit_text(
-            json.dumps(compact, ensure_ascii=False),
-            label="literature-matrix-input",
-            occupied=instruction,
-            reserve_tokens=self.config.context_window // 3,
-        )
-        result = self.client.complete(
+
+        def _paper_prompt(paper):
+            return instruction + "\n" + json.dumps([paper], ensure_ascii=False)
+
+        results = self.client.map_complete(
             "literature_matrix_extraction",
-            instruction + "\n" + evidence,
-            fallback=json.dumps([], ensure_ascii=False),
+            compact,
+            _paper_prompt,
             system="Conservative academic evidence extraction; valid JSON only.",
             temperature=0,
+            fallback_fn=lambda p: json.dumps([], ensure_ascii=False),
         )
-        try:
-            extracted = self._json_array(result.text)
-            rows = [
-                self._merge_row(paper, extracted[index] if index < len(extracted) else {}, index + 1)
-                for index, paper in enumerate(papers)
-            ]
-        except (ValueError, json.JSONDecodeError):
-            rows = unavailable_rows
+        extracted_all: list[dict[str, Any]] = []
+        for result in results:
+            try:
+                parsed = self._json_array(result.text)
+                extracted_all.extend(parsed)
+            except (ValueError, json.JSONDecodeError):
+                pass
+        rows = [
+            self._merge_row(paper, extracted_all[index] if index < len(extracted_all) else {}, index + 1)
+            for index, paper in enumerate(papers)
+        ]
         paths = self._write_matrix(rows)
         lines = [f"已整理 {len(rows)} 篇论文："]
         for index, row in enumerate(rows[:8], 1):

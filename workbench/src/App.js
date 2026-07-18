@@ -637,19 +637,28 @@ export default function App() {
     if (!deleteMode) { setDeleteMode(true); setSelectedSessions(new Set()); return; }
     if (!selectedSessions.size) { setDeleteMode(false); return; }
     const ids = [...selectedSessions];
-    await Promise.all(ids.map(id => fetch(`${API}/runs/${encodeURIComponent(id)}/delete`, { method: "POST" }).catch(() => {})));
-    if (ids.includes(runId)) {
-      generationRef.current += 1; runIdRef.current = "";
-      setRunId(""); setMessages([]);
+    const results = await Promise.all(ids.map(id =>
+      fetch(`${API}/runs/${encodeURIComponent(id)}/delete`, { method: "POST" }).then(r => r.ok, () => false)
+    ));
+    if (results.every(Boolean)) {
+      if (ids.includes(runId)) {
+        generationRef.current += 1; runIdRef.current = "";
+        setRunId(""); setMessages([]);
+      }
+      setSelectedSessions(new Set()); setDeleteMode(false); loadSessions();
     }
-    setSelectedSessions(new Set()); setDeleteMode(false); loadSessions();
   };
 
   const deleteMessages = async () => {
     if (msgDeleteMode && selectedMsgs.size > 0) {
       const indices = [...selectedMsgs].sort((left, right) => right - left);
-      await Promise.all(indices.map(index => fetch(`${API}/runs/${encodeURIComponent(runId)}/trim/${index}`, { method: "POST" }).catch(() => {})));
-      setMessages(previous => previous.filter((_, index) => !selectedMsgs.has(index))); setSelectedMsgs(new Set()); setMsgDeleteMode(false);
+      const results = await Promise.all(indices.map(index =>
+        fetch(`${API}/runs/${encodeURIComponent(runId)}/trim/${index}`, { method: "POST" }).then(r => r.ok, () => false)
+      ));
+      if (results.every(Boolean)) {
+        setMessages(previous => previous.filter((_, index) => !selectedMsgs.has(index)));
+        setSelectedMsgs(new Set()); setMsgDeleteMode(false);
+      }
     } else { setMsgDeleteMode(value => !value); setSelectedMsgs(new Set()); }
   };
 

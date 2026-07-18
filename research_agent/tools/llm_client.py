@@ -4,6 +4,7 @@ import http.client
 import json
 import re
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import time as _time
 import urllib.error
 import urllib.request
@@ -79,36 +80,71 @@ def _response_text_length(value: Any) -> int:
 # patterns match the known serialisation styles so we can extract the
 # payload, convert it to a native tool-call object, and strip it from
 # the user-visible response.
-_FUNCTION_CALLS_FENCE = re.compile(r"<function_calls>[\s\S]*?</function_calls>", re.IGNORECASE)
-_INVOKE_PATTERN = re.compile(r"<invoke\s+name\s*=\s*\"([^\"]+)\">[\s\S]*?</invoke>", re.IGNORECASE)
-_PARAM_PATTERN = re.compile(r"<parameter\s+name\s*=\s*\"([^\"]+)\"(?:\s+string\s*=\s*\"(true|false)\")?>([\s\S]*?)</parameter>", re.IGNORECASE)
-_DSML_FENCE = re.compile(r"(?:【|\[)(?:【|\[)?\s*([a-zA-Z_][a-zA-Z0-9_-]*)\s*(?:】|\])[\s\S]*?(?:】|\])", re.IGNORECASE)
+# Known formats:
+#   <function_calls><invoke …>…</invoke></function_calls>
+#   <tool_calls><invoke …>…</invoke></tool_calls>
+#   <||DSML||tool_calls><||DSML||invoke …>…</||DSML||invoke></||DSML||tool_calls>
+_DB = "｜｜"  # fullwidth double bar ｜｜
+_DSML_OPEN = re.compile(
+    r"<(?:function_calls|tool_calls|" + _DB + r"DSML" + _DB + r"\w+)>[\s\S]*"
+    r"</(?:function_calls|tool_calls|" + _DB + r"DSML" + _DB + r"\w+)>",
+    re.IGNORECASE,
+)
+_DSML_INVOKE = re.compile(
+    r"<invoke\s+name\s*=\s*\"([^\"]+)\">[\s\S]*?</invoke>"
+    r"|<" + _DB + r"DSML" + _DB + r"invoke\s+name\s*=\s*\"([^\"]+)\">[\s\S]*?</" + _DB + r"DSML" + _DB + r"invoke>",
+    re.IGNORECASE,
+)
+_DSML_PARAM = re.compile(
+    r"<parameter\s+name\s*=\s*\"([^\"]+)\"(?:\s+string\s*=\s*\"(true|false)\")?>([\s\S]*?)</parameter>"
+    r"|<" + _DB + r"DSML" + _DB + r"parameter\s+name\s*=\s*\"([^\"]+)\"(?:\s+string\s*=\s*\"(true|false)\")?>([\s\S]*?)</" + _DB + r"DSML" + _DB + r"parameter>",
+    re.IGNORECASE,
+)
 
 
 def _strip_tool_call_text(text: str) -> str:
-    """Remove *all* known tool-call serialisations from user-visible content."""
     if not text:
         return ""
-    cleaned = _FUNCTION_CALLS_FENCE.sub("", text)
-    cleaned = _DSML_FENCE.sub("", cleaned)
-    return cleaned.strip()
+    return _DSML_OPEN.sub("", text).strip()
+
+
+def _coerce_param_value(raw: str) -> Any:
+    """Auto-detect the intended type of a DSML parameter value.
+    Not hardcoded to any tool or field name — purely value-driven."""
+    if not raw:
+        return ""
+    if raw.startswith("[") and raw.endswith("]"):
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    stripped = raw.strip()
+    if re.match(r"^-?\d+$", stripped):
+        return int(stripped)
+    if re.match(r"^-?\d+\.\d+$", stripped):
+        return float(stripped)
+    if stripped.lower() in ("true", "false"):
+        return stripped.lower() == "true"
+    return raw
 
 
 def _extract_xml_tool_calls(text: str) -> list[dict[str, Any]]:
-    """Parse ``<function_calls><invoke …>…`` blocks into native tool-call dicts."""
     calls: list[dict[str, Any]] = []
-    for block in _FUNCTION_CALLS_FENCE.findall(text):
-        for invoke in _INVOKE_PATTERN.finditer(block):
-            name = invoke.group(1)
+    for block in _DSML_OPEN.findall(text):
+        for invoke in _DSML_INVOKE.finditer(block):
+            name = invoke.group(1) or invoke.group(2)
             params: dict[str, Any] = {}
-            for param in _PARAM_PATTERN.finditer(invoke.group(0)):
-                key = param.group(1)
-                is_json = param.group(2)
-                raw = param.group(3).strip()
-                try:
-                    params[key] = json.loads(raw) if is_json == "true" else raw
-                except (json.JSONDecodeError, TypeError):
-                    params[key] = raw
+            for param in _DSML_PARAM.finditer(invoke.group(0)):
+                key = param.group(1) or param.group(4)
+                is_json = param.group(2) or param.group(5)
+                raw = (param.group(3) or param.group(6) or "").strip()
+                if is_json == "true":
+                    try:
+                        params[key] = json.loads(raw)
+                    except (json.JSONDecodeError, TypeError):
+                        params[key] = raw
+                else:
+                    params[key] = _coerce_param_value(raw)
             if name:
                 calls.append({
                     "id": f"dsml-{len(calls)}",
@@ -119,7 +155,6 @@ def _extract_xml_tool_calls(text: str) -> list[dict[str, Any]]:
 
 
 def _extract_tool_calls_from_content(text: str) -> tuple[str, list[dict[str, Any]]]:
-    """Return (cleaned_text, extra_tool_calls) after extracting embedded tool calls."""
     if not text:
         return "", []
     extra = _extract_xml_tool_calls(text)
@@ -128,18 +163,23 @@ def _extract_tool_calls_from_content(text: str) -> tuple[str, list[dict[str, Any
 
 
 def _is_inside_fence(text: str) -> bool:
-    """True when *text* looks like it is mid-way through a DSML / XML tool-call
-    block.  Used during streaming to suppress partial blocks from being emitted
-    as user-visible content."""
     if not text:
         return False
-    # XML format: opened but not yet closed
-    if "<function_calls>" in text and "</function_calls>" not in text:
-        return True
-    return False
+    opened = any(p in text for p in (
+        "<function_calls>", "<tool_calls>",
+        "<" + _DB + "DSML" + _DB,
+        _DB + "DSML" + _DB,
+    ))
+    closed = any(p in text for p in (
+        "</function_calls>", "</tool_calls>",
+        "</" + _DB + "DSML" + _DB,
+        _DB + "DSML" + _DB,
+    ))
+    return opened and not closed
 
 
 def _normalize_response(data: Any) -> NormalizedResponse:
+#   <｜｜DSML｜｜tool_calls><｜｜DSML｜｜invoke …>…(data: Any) -> NormalizedResponse:
     choices = data.get("choices") if isinstance(data, dict) else None
     choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
     message = choice.get("message") if isinstance(choice.get("message"), dict) else {}
@@ -465,6 +505,58 @@ class ModelGateway:
             assistant_message=raw_message if isinstance(raw_message, dict) else None,
             usage=data.get("usage") if isinstance(data.get("usage"), dict) else {}, call_id=call_id,
         )
+
+    def map_complete(
+        self,
+        operation: str,
+        items: list[dict[str, Any]],
+        prompt_fn,
+        *,
+        system: str = "",
+        temperature: float = 0.0,
+        fallback_fn=None,
+    ) -> list[LLMResult]:
+        """One ``complete()`` call per item, all sent concurrently.
+
+        Concurrency is naturally bounded by the provider max-concurrency
+        semaphore that every ``complete()`` acquires in ``_perform()``.
+        No extra throttling — one item, one request, fire all at once.
+        """
+        if not items:
+            return []
+        max_workers = len(items)
+
+        def _one(item):
+            if self.cancel_event and self.cancel_event.is_set():
+                return LLMResult("", self.config.llm_provider, self.config.llm_model, False, "cancelled", operation)
+            prompt = prompt_fn(item)
+            result = self.complete(operation, prompt, fallback="" if fallback_fn is None else fallback_fn(item),
+                                   system=system, temperature=temperature)
+            if result.error == "rate_limited" and result.retry_after is not None:
+                import time as _time
+                _time.sleep(min(result.retry_after, 10.0))
+                result = self.complete(operation, prompt, fallback="" if fallback_fn is None else fallback_fn(item),
+                                       system=system, temperature=temperature)
+            return result
+
+        results: list[LLMResult] = []
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            future_to_index = {pool.submit(_one, item): i for i, item in enumerate(items)}
+            indexed: dict[int, LLMResult] = {}
+            for future in as_completed(future_to_index):
+                idx = future_to_index[future]
+                try:
+                    indexed[idx] = future.result()
+                except Exception:
+                    item = items[idx]
+                    indexed[idx] = LLMResult(
+                        fallback_fn(item) if fallback_fn else "",
+                        self.config.llm_provider, self.config.llm_model, False,
+                        "map_item_failed", operation,
+                    )
+        for i in range(len(items)):
+            results.append(indexed[i])
+        return results
 
     def chat(
         self,
