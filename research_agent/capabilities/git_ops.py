@@ -4,16 +4,21 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from research_agent.capabilities.workspace import WorkspaceContext
+
 
 class GitService:
-    """Run git commands inside the project root or session directory."""
+    """Run git commands inside the current session workspace."""
+
+    def __init__(self, session_dir: Path | WorkspaceContext):
+        self.context = session_dir if isinstance(session_dir, WorkspaceContext) else WorkspaceContext.for_session(session_dir)
 
     def run(self, arguments: dict[str, Any]) -> dict[str, Any]:
         command = str(arguments.get("command", "")).strip()
         if not command:
             raise ValueError("git requires a command")
 
-        cwd = Path(arguments.get("cwd") or ".")
+        cwd = self.context.resolve(str(arguments.get("cwd") or "."))
         cwd.mkdir(parents=True, exist_ok=True)
 
         # Ensure git repo exists

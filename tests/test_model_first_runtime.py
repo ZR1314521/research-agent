@@ -40,6 +40,17 @@ def native_tool_call(call_id: str = "call-1", arguments: dict | None = None) -> 
     )
 
 
+def named_tool_call(name: str, arguments: dict, call_id: str = "call-control") -> LLMResult:
+    tool_calls = [{
+        "id": call_id, "type": "function",
+        "function": {"name": name, "arguments": json.dumps(arguments, ensure_ascii=False)},
+    }]
+    return LLMResult(
+        "", "test", "model", True, operation="agent_turn", outcome="native_tool_call",
+        tool_calls=tool_calls, assistant_message={"role": "assistant", "tool_calls": tool_calls},
+    )
+
+
 class ModelFirstRuntimeTests(unittest.TestCase):
     def setUp(self) -> None:
         root = TEST_TMP / "agent"
@@ -87,6 +98,35 @@ class ModelFirstRuntimeTests(unittest.TestCase):
         self.assertEqual(result.message, "你好，我在。")
         loop.executor.execute.assert_not_called()
         self.assertEqual(self.session.model_messages[-1]["content"], "你好，我在。")
+
+    def test_declared_file_arguments_are_scoped_and_resolved_by_the_executor(self) -> None:
+        loop = self.loop()
+        workspace_file = loop.executor.workspace_context.uploads_root / "notes.md"
+        workspace_file.write_text("evidence", encoding="utf-8")
+        captured: dict[str, str] = {}
+
+        def inspect(arguments, _session):
+            captured["path"] = arguments["path"]
+            return {"message": "ok", "artifacts": {}, "data": {}}
+
+        loop.executor.handlers["document_summary"] = inspect
+        loop.executor.execute("document-summary", {"path": "uploads/notes.md"}, self.session)
+        self.assertEqual(Path(captured["path"]), workspace_file.resolve())
+
+        outside = self.root / "outside.md"
+        outside.write_text("private", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "当前会话工作区"):
+            loop.executor.execute("document-summary", {"path": str(outside)}, self.session)
+
+    def test_file_producing_services_default_to_the_session_workspace(self) -> None:
+        executor = self.loop().executor
+        workspace = executor.workspace_context.workspace_root
+        services = [
+            executor.literature, executor.documents, executor.rag, executor.references,
+            executor.data, executor.data_transform, executor.arxiv, executor.papers,
+            executor.office_md,
+        ]
+        self.assertTrue(all(Path(service.session_dir).resolve() == workspace for service in services))
 
     def test_native_tool_messages_are_preserved_for_model_followup(self) -> None:
         loop = self.loop()
@@ -235,11 +275,7 @@ class ModelFirstRuntimeTests(unittest.TestCase):
         self.session.status = "planning"
         self.session.metadata["plan_mode"] = True
         loop.client.chat = MagicMock(side_effect=[
-            LLMResult(
-                "计划：先查看目录，再根据结果处理。", "test", "model", True,
-                operation="agent_turn", outcome="text",
-                assistant_message={"role": "assistant", "content": "计划：先查看目录，再根据结果处理。"},
-            ),
+            named_tool_call("present-plan", {"content": "计划：先查看目录，再根据结果处理。"}),
             native_tool_call(arguments={"operation": "list", "path": "."}),
             LLMResult(
                 "计划已经执行完成。", "test", "model", True,
@@ -262,14 +298,33 @@ class ModelFirstRuntimeTests(unittest.TestCase):
         self.assertNotIn("plan_mode", self.session.metadata)
         loop.executor.execute.assert_called_once()
 
+    def test_plan_clarification_does_not_request_execution_approval(self) -> None:
+        loop = self.loop()
+        self.session.status = "planning"
+        self.session.metadata["plan_mode"] = True
+        loop.client.chat = MagicMock(return_value=LLMResult(
+            "你希望先做实证论文还是综述？", "test", "model", True,
+            operation="agent_turn", outcome="text",
+            assistant_message={"role": "assistant", "content": "你希望先做实证论文还是综述？"},
+        ))
+
+        response = loop.run(self.session, "帮我规划论文")
+
+        self.assertFalse(response.waiting)
+        self.assertEqual(response.message, "你希望先做实证论文还是综述？")
+        self.assertEqual(self.session.status, "planning")
+        self.assertIsNone(self.session.pending_action)
+
 
 class WorkspaceServiceTests(unittest.TestCase):
-    def test_read_tail_search_context_and_global_workspace(self) -> None:
+    def test_workspace_operations_are_scoped_to_the_current_session(self) -> None:
         root = TEST_TMP / "workspace"
         session_dir = root / "runs" / "one"
         session_dir.mkdir(parents=True, exist_ok=True)
-        (root / "notes.md").write_text("first\nneedle here\nthird\nfourth\n", encoding="utf-8")
         service = WorkspaceService(root, session_dir)
+        workspace = session_dir / "workspace"
+        workspace.mkdir(parents=True, exist_ok=True)
+        (workspace / "notes.md").write_text("first\nneedle here\nthird\nfourth\n", encoding="utf-8")
 
         tail = service.operate({"operation": "read", "path": "notes.md", "limit": 2, "tail": True})
         found = service.operate({"operation": "search", "path": ".", "query": "needle"})
@@ -281,8 +336,15 @@ class WorkspaceServiceTests(unittest.TestCase):
         self.assertIn("notes.md", root_listing["data"]["files"])
         outside = root.parent / "outside.txt"
         outside.write_text("global workspace file", encoding="utf-8")
-        external = service.operate({"operation": "read", "path": str(outside)})
-        self.assertIn("global workspace file", external["message"])
+        with self.assertRaisesRegex(ValueError, "当前会话工作区"):
+            service.operate({"operation": "read", "path": str(outside)})
+
+        other_session = root / "runs" / "two" / "workspace"
+        other_session.mkdir(parents=True, exist_ok=True)
+        other_file = other_session / "private.txt"
+        other_file.write_text("other session", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "当前会话工作区"):
+            service.operate({"operation": "read", "path": str(other_file)})
 
 
 class FakeResponse:

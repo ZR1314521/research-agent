@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from research_agent.capabilities.charting import ChartService
+from research_agent.capabilities.code_runner import CodeRunnerService
 from research_agent.capabilities.data_analysis import ExperimentAnalysisService
 from research_agent.config import AgentConfig
 from research_agent.core.agent import AgentLoop
@@ -25,7 +26,8 @@ class ChartServiceTests(unittest.TestCase):
         self.tmp = ROOT / ".test_runs" / self.id().replace(".", "_")
         shutil.rmtree(self.tmp, ignore_errors=True)
         self.tmp.mkdir(parents=True)
-        self.source = self.tmp / "experiment.csv"
+        self.source = self.tmp / "workspace" / "uploads" / "experiment.csv"
+        self.source.parent.mkdir(parents=True, exist_ok=True)
         self.source.write_text(
             "time,control,treatment,group\n"
             "1,2.0,2.4,A\n"
@@ -93,13 +95,46 @@ class ChartServiceTests(unittest.TestCase):
 
         self.assertEqual(result["data"]["chart_type"], "line")
 
+    def test_chart_cannot_read_data_outside_the_session_workspace(self) -> None:
+        outside = self.tmp.parent / "outside-chart.csv"
+        outside.write_text("x,y\n1,2\n", encoding="utf-8")
+        self.addCleanup(outside.unlink, missing_ok=True)
+
+        with self.assertRaisesRegex(ValueError, "当前会话工作区"):
+            ChartService(self.tmp).render({"path": str(outside), "chart_type": "line", "x": "x", "y": ["y"]})
+
+
+class InlineCodePlotTests(unittest.TestCase):
+    def test_matplotlib_output_is_returned_as_a_real_user_artifact(self) -> None:
+        session_dir = ROOT / ".test_runs" / self.id().replace(".", "_")
+        shutil.rmtree(session_dir, ignore_errors=True)
+        self.addCleanup(shutil.rmtree, session_dir, True)
+        service = CodeRunnerService(session_dir)
+
+        result = service.run({
+            "code": (
+                "import matplotlib.pyplot as plt\n"
+                "plt.plot([1, 2, 3], [2, 4, 3])\n"
+                "plt.title('Inline result')\n"
+                "plt.savefig('inline_plot.png')\n"
+            )
+        })
+
+        self.assertTrue(result["data"]["ok"])
+        self.assertEqual(len(result["artifacts"]), 1)
+        output = Path(next(iter(result["artifacts"].values())))
+        self.assertEqual(output.parent, session_dir / "workspace")
+        self.assertEqual(output.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
+        self.assertIn("生成 1 个图像成果", result["message"])
+
 
 class SchemaFirstAnalysisTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = ROOT / ".test_runs" / self.id().replace(".", "_")
         shutil.rmtree(self.tmp, ignore_errors=True)
         self.tmp.mkdir(parents=True)
-        self.source = self.tmp / "schema-first.csv"
+        self.source = self.tmp / "workspace" / "uploads" / "schema-first.csv"
+        self.source.parent.mkdir(parents=True, exist_ok=True)
         self.source.write_text(
             "subject_score,condition,step,accuracy\n101,A,1,0.71\n102,A,2,0.76\n103,B,3,0.82\n104,B,4,0.88\n",
             encoding="utf-8",

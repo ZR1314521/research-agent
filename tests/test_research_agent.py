@@ -148,7 +148,8 @@ class ResearchChatAgentTests(unittest.TestCase):
 
     def test_data_analysis_and_rag(self) -> None:
         session = self.agent.new_session()
-        data = self.tmp / "experiment.csv"
+        data = self.agent.sessions.directory(session.session_id) / "workspace" / "uploads" / "experiment.csv"
+        data.parent.mkdir(parents=True, exist_ok=True)
         data.write_text("epoch,group,accuracy\n1,A,0.70\n2,A,0.75\n3,B,0.82\n4,B,0.95\n", encoding="utf-8")
         with patch("research_agent.tools.llm_client.LLMClient.chat", side_effect=[
             model_tool("experiment-data-analysis", {"path": str(data)}), model_text("实验分析完成。"),

@@ -120,6 +120,52 @@ class ProviderStreamTests(unittest.TestCase):
                 buf.clear()
         self.assertFalse(leaked, "DSML leaked during streaming")
 
+    def test_real_namespaced_dsml_is_never_emitted_as_assistant_text(self) -> None:
+        run_dir = ROOT / ".test_runtime" / "turn_stream" / "namespaced-dsml"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        config = replace(
+            AgentConfig.load(ROOT),
+            llm_provider="compatible-test", llm_protocol="openai-compatible",
+            llm_model="test-model", llm_base_url="https://example.invalid/v1",
+            llm_api_key="key", llm_max_tokens=0, llm_retry=0,
+        )
+        sample = (
+            "Crossref success.\n\n"
+            "<｜｜DSML｜｜tool_calls>"
+            "<｜｜DSML｜｜invoke name=\"literature-search-crossref\">"
+            "<｜｜DSML｜｜parameter name=\"query\" string=\"true\">EEG motor imagery</｜｜DSML｜｜parameter>"
+            "<｜｜DSML｜｜parameter name=\"limit\" string=\"false\">20</｜｜DSML｜｜parameter>"
+            "</｜｜DSML｜｜invoke>"
+            "</｜｜DSML｜｜tool_calls>"
+        )
+        split_at = (4, 19, 22, 39, 67, 121, 173, len(sample))
+        pieces = [sample[start:end] for start, end in zip((0, *split_at[:-1]), split_at)]
+        chunks = [
+            {"choices": [{"delta": {"content": piece}, "finish_reason": None}]}
+            for piece in pieces
+        ]
+        chunks[-1]["choices"][0]["finish_reason"] = "stop"
+        events: list[ProviderEvent] = []
+
+        gateway = ModelGateway(config, ModelCallLogger(run_dir))
+        with patch(
+            "research_agent.tools.llm_client.urllib.request.urlopen",
+            return_value=FakeStreamResponse(chunks),
+        ):
+            result = gateway.chat("test", [{"role": "user", "content": "search"}], on_event=events.append)
+
+        visible = "".join(
+            str(event.data.get("text") or "")
+            for event in events
+            if event.kind == "assistant_delta"
+        )
+        self.assertEqual(visible.strip(), "Crossref success.")
+        self.assertNotIn("DSML", visible)
+        self.assertEqual(result.text, "Crossref success.")
+        self.assertEqual(len(result.tool_calls), 1)
+        self.assertEqual(result.tool_calls[0]["function"]["name"], "literature-search-crossref")
+        self.assertEqual(json.loads(result.tool_calls[0]["function"]["arguments"])["limit"], 20)
+
     def test_inherited_turn_sink_keeps_internal_model_content_out_of_user_stream(self) -> None:
         run_dir = ROOT / ".test_runtime" / "turn_stream" / "internal-visibility"
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -184,6 +230,32 @@ class BlockingAgent:
 
 
 class TurnCoordinatorTests(unittest.TestCase):
+    def test_approval_resolution_leaves_the_waiting_boundary_atomically(self) -> None:
+        root = ROOT / ".test_runtime" / "turn_stream" / "approval"
+        root.mkdir(parents=True, exist_ok=True)
+        control = TurnControl("run-one", root)
+        decisions: list[bool | None] = []
+
+        def worker() -> None:
+            decisions.append(control.wait_for_approval())
+            control.finish("completed", {"assistant_message": "continued"})
+
+        thread = threading.Thread(target=worker)
+        thread.start()
+        deadline = time.time() + 1
+        while control.state != "waiting_approval" and time.time() < deadline:
+            time.sleep(0.01)
+
+        self.assertEqual(control.resolve_approval(True), "resuming")
+        self.assertEqual(control.resolve_approval(True), "resuming")
+        self.assertEqual(control.wait_for_result_boundary(), "completed")
+        thread.join(1)
+        self.assertEqual(decisions, [True])
+        self.assertEqual(
+            len([event for event in control.events if event["event"] == "approval_resolved"]),
+            1,
+        )
+
     def test_only_one_active_turn_per_run(self) -> None:
         root = ROOT / ".test_runtime" / "turn_stream" / "coordinator"
         root.mkdir(parents=True, exist_ok=True)

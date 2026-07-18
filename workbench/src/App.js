@@ -14,7 +14,7 @@ import { applyTheme, loadTheme } from "./theme";
 const API_PORT = process.env.REACT_APP_API_PORT || "8878";
 const API_HOST = process.env.REACT_APP_API_HOST || "127.0.0.1";
 const API = String(process.env.REACT_APP_API_BASE || `http://${API_HOST}:${API_PORT}`).replace(/\/$/, "");
-const BUSY = new Set(["running", "pause_requested", "paused", "waiting_approval", "rate_limited"]);
+const BUSY = new Set(["running", "resuming", "pause_requested", "paused", "waiting_approval", "rate_limited"]);
 
 export function outcomeStepStatus(outcome, ok = true) {
   return ({
@@ -41,7 +41,7 @@ function initialPage() {
 
 function statusLabel(value) {
   const labels = {
-    idle: "就绪", active: "就绪", running: "运行中", pause_requested: "暂停中",
+    idle: "就绪", active: "就绪", running: "运行中", resuming: "正在继续", pause_requested: "暂停中",
     paused: "已暂停", waiting_approval: "等待确认", rate_limited: "等待限流恢复",
     completed: "已完成", failed: "失败", cancelled: "已取消",
   };
@@ -57,10 +57,10 @@ function WorkflowInspector({ runId, steps, artifacts, onClose }) {
     <aside className="run-inspector" aria-label="任务检查器">
       <header><button type="button" className="inspector-close" onClick={onClose} aria-label="关闭任务详情"><Icon name="x" size={18} /></button><span>Task details</span><h2>任务轨迹</h2><p>这里只展示可理解的步骤与成果，不展示内部日志和模型原始数据。</p></header>
       <section className="inspector-section">
-        <div className="inspector-heading"><h3>执行步骤</h3><span>{steps.length}</span></div>
+        <div className="inspector-heading"><h3>工具执行记录</h3><span>{steps.length}</span></div>
         <div className="inspector-steps">
           {steps.map(step => <article key={step.id || `${step.skill}-${step.started_at}`} className={`inspector-step ${step.status}`}><i /><div><strong>{step.status === "running" ? "正在处理" : step.summary || stepStateLabel(step.status)}</strong><span>{stepStateLabel(step.status)}</span></div></article>)}
-          {!steps.length && <p className="inspector-empty">尚未执行工具。对话与一般问答不会伪造工作流步骤。</p>}
+          {!steps.length && <p className="inspector-empty">尚未调用工具。普通对话不会产生虚假的执行记录。</p>}
         </div>
       </section>
       <section className="inspector-section artifact-inspector">
@@ -127,7 +127,7 @@ function WorkspacePage({
   control, messages, msgDeleteMode, selectedMsgs, setSelectedMsgs, onDeleteMessages,
   pendingApproval, resolveApproval, error, files, setFiles, upload, styleGroups,
   convertFormat, planActive, startTurn, message, setMessage, busy, activeTurnId, bottomRef,
-  artifacts, workflowSteps,
+  artifacts, workflowSteps, approvalMode, toggleApprovalMode,
 }) {
   const activeSession = sessions.find(session => session.run_id === runId);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -174,6 +174,14 @@ function WorkspacePage({
             <span className={`run-status status-${turnState}`}><i />{statusLabel(turnState)}</span>
           </div>
           <div className="workspace-header-actions">
+            <button
+              type="button"
+              className={`auto-mode-toggle ${approvalMode === "auto" ? "active" : ""}`}
+              aria-pressed={approvalMode === "auto"}
+              onClick={toggleApprovalMode}
+              disabled={!runId}
+              title="自动批准工作区内的低风险操作；敏感操作仍会询问"
+            >Auto {approvalMode === "auto" ? "已开启" : "关闭"}</button>
             <button type="button" className="task-details-button" onClick={() => setDetailsOpen(true)}>任务详情{detailCount ? ` ${detailCount}` : ""}</button>
             <ContextMeter modelName={modelName} contextSize={contextSize} contextWindow={contextWindow} />
             <button type="button" onClick={() => control("pause")} disabled={turnState !== "running"}><Icon name="pause" className="btn-icon" />暂停</button>
@@ -186,8 +194,8 @@ function WorkspacePage({
           {messages.length === 0 && (
             <div className="workspace-empty">
               <BrandMark />
-              <h2>今天想完成什么科研工作？</h2>
-              <p>直接描述目标，Agent 会按需要调用文献、数据、写作和文件工具。</p>
+              <h2>告诉我你最后想看到什么</h2>
+              <p>可以直接说明目标、现有材料和希望得到的成果；Agent 会自主判断是否需要调用工具。</p>
             </div>
           )}
           {messages.map((item, index) => {
@@ -289,6 +297,7 @@ export default function App() {
   const [activeTurnId, setActiveTurnId] = useState("");
   const [pendingApproval, setPendingApproval] = useState(null);
   const [planActive, setPlanActive] = useState(false);
+  const [approvalMode, setApprovalMode] = useState("manual");
   const [styleGroups, setStyleGroups] = useState([]);
   const [apiVersion, setApiVersion] = useState("");
   const [modelName, setModelName] = useState("");
@@ -364,6 +373,7 @@ export default function App() {
     const pending = ["tool_approval", "plan_approval"].includes(run.pending_action?.type) ? run.pending_action : null;
     setPendingApproval(pending);
     setPlanActive(run.plan_mode === true);
+    setApprovalMode(run.approval_mode === "auto" ? "auto" : "manual");
     if (run.active_turn?.turn_id) { setActiveTurnId(run.active_turn.turn_id); setTurnState(run.active_turn.status || "running"); }
     else if (pending) setTurnState("waiting_approval");
     else if (run.status === "completed") setTurnState("completed");
@@ -396,7 +406,10 @@ export default function App() {
 
   const handleEvent = useCallback((event, generation) => {
     if (generation !== generationRef.current || !event) return;
-    sequenceRef.current = Math.max(sequenceRef.current, Number(event.sequence || 0));
+    if (event.turn_id && turnIdRef.current && event.turn_id !== turnIdRef.current) sequenceRef.current = 0;
+    const sequence = Number(event.sequence || 0);
+    if (sequence > 0 && sequence <= sequenceRef.current) return;
+    sequenceRef.current = Math.max(sequenceRef.current, sequence);
     if (event.turn_id) { setActiveTurnId(event.turn_id); turnIdRef.current = event.turn_id; }
     switch (event.event) {
       case "turn_started": setTurnState("running"); break;
@@ -591,6 +604,18 @@ export default function App() {
     } catch (eventError) { setError(eventError.message); }
   };
 
+  const toggleApprovalMode = async () => {
+    if (!runId) return;
+    const mode = approvalMode === "auto" ? "manual" : "auto";
+    try {
+      const response = await fetch(`${API}/runs/${encodeURIComponent(runId)}/approval-mode`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode }),
+      });
+      if (!response.ok) throw new Error((await response.json()).detail || response.statusText);
+      applyRun(await response.json());
+    } catch (eventError) { setError(eventError.message); }
+  };
+
   const resolveApproval = async approved => {
     if (!pendingApproval || turnState !== "waiting_approval" || resolvingRef.current) return;
     resolvingRef.current = true;
@@ -600,13 +625,11 @@ export default function App() {
         const response = await fetch(`${API}/runs/${encodeURIComponent(runId)}/reject`, { method: "POST" });
         if (!response.ok) throw new Error((await response.json()).detail || response.statusText);
         const data = await response.json(); applyRun(data);
-        if (data.assistant_message) setMessages(previous => [...previous, { role: "agent", content: data.assistant_message, reasoning: "", steps: [], artifacts: data.artifacts || {}, streaming: false }]);
         return;
       }
       const response = await fetch(`${API}/runs/${encodeURIComponent(runId)}/approve`, { method: "POST" });
       if (!response.ok) throw new Error((await response.json()).detail || response.statusText);
       const data = await response.json(); applyRun(data);
-      setMessages(previous => [...previous, { role: "agent", content: data.assistant_message || "操作已完成。", reasoning: "", steps: (data.events || []).filter(event => event.event === "tool_observed").map(event => ({ key: event.sequence, tool: event.skill || "", status: "done", summary: (event.summary || "").slice(0, 200) })), artifacts: data.artifacts || {}, streaming: false }]);
     } catch (eventError) {
       setError(eventError.message); setTurnState("idle");
     } finally {
@@ -681,6 +704,7 @@ export default function App() {
           upload={upload} styleGroups={styleGroups} convertFormat={convertFormat} planActive={planActive} startTurn={startTurn}
           message={message} setMessage={setMessage} busy={busy} activeTurnId={activeTurnId} bottomRef={bottomRef}
               artifacts={artifacts} workflowSteps={workflowSteps}
+              approvalMode={approvalMode} toggleApprovalMode={toggleApprovalMode}
         />}
         {page === "tasks" && <TaskCenterPage api={API} sessions={sessions} onOpen={openTask} onRefresh={loadSessions} />}
         {page === "settings" && <SettingsPage api={API} onAccountChange={setAccount} />}

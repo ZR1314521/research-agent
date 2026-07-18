@@ -84,6 +84,16 @@
       "write_access": true
     },
     {
+      "name": "manuscript-writing",
+      "kind": "tool",
+      "handler": "compose_manuscript",
+      "planner_visible": true,
+      "description": "Create a complete evidence-audited manuscript draft from user material and any relevant session artifacts. The model chooses when to use it; no fixed search or writing sequence is required.",
+      "write_access": true,
+      "direct_delivery": true,
+      "effects": ["artifact.create"]
+    },
+    {
       "name": "docx",
       "kind": "tool",
       "handler": "export_docx",
@@ -185,6 +195,15 @@
       "handler": null,
       "planner_visible": false,
       "description": "Human approval and resume design guidance implemented by local sessions."
+    },
+    {
+      "name": "present-plan",
+      "kind": "control",
+      "handler": "present_plan",
+      "planner_visible": true,
+      "description": "Present a completed, implementation-ready plan for user approval. Do not use for clarification questions or incomplete drafts.",
+      "control_action": "plan_approval",
+      "available_in": ["planning"]
     },
     {
       "name": "workflow-orchestration-patterns",
@@ -295,7 +314,8 @@
       "handler": "run_code",
       "planner_visible": true,
       "description": "Execute Python code for data analysis, statistical tests, scientific computing, plotting, and any custom computation. Returns stdout, stderr, and exit code.",
-      "write_access": true
+      "write_access": true,
+      "effects": ["process.exec", "artifact.create"]
     },
     {
       "name": "web-fetch",
@@ -310,7 +330,8 @@
       "kind": "tool",
       "handler": "git",
       "planner_visible": true,
-      "description": "Version control with git. Run init, add, commit, log, diff, status, checkout, branch in the working directory."
+      "description": "Version control with git. Run init, add, commit, log, diff, status, checkout, branch in the working directory.",
+      "effects": ["process.exec", "repo.write"]
     },
     {
       "name": "office-to-md",
@@ -335,7 +356,8 @@
       "kind": "tool",
       "handler": "shell",
       "planner_visible": true,
-      "description": "Run a shell command and return stdout, stderr, and exit code. Use for system tasks, file operations, or any CLI tool."
+      "description": "Run a shell command and return stdout, stderr, and exit code. Use for system tasks, file operations, or any CLI tool.",
+      "effects": ["process.exec"]
     },
     {
       "name": "officecli",
@@ -345,7 +367,8 @@
       "description": "Create, read, edit, and validate Office documents (.docx, .xlsx, .pptx) via officecli. Single binary, no Office installation required. Consult the officecli SKILL.md for full capability reference.",
       "write_access": true,
       "direct_delivery": true,
-      "batch_policy": "single"
+      "batch_policy": "single",
+      "effects": ["process.exec", "document.modify"]
     }
   ]
 }

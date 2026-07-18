@@ -15,7 +15,7 @@ from research_agent.capabilities.quality import QualityAuditService
 from research_agent.capabilities.rag import RagService
 from research_agent.capabilities.references import ReferenceService
 from research_agent.capabilities.writing import WritingService
-from research_agent.capabilities.workspace import WorkspaceService
+from research_agent.capabilities.workspace import WorkspaceContext, WorkspaceService
 from research_agent.capabilities.papers import PaperAcquisitionService
 from research_agent.capabilities.web_search import HttpWebSearchService, WebSearchService
 from research_agent.capabilities.code_runner import CodeRunnerService
@@ -32,33 +32,42 @@ from research_agent.skill_registry import SkillRegistry
 
 
 class ToolExecutor:
+    SENSITIVE_EFFECTS = {
+        "credential.read", "external.side_effect", "fs.delete", "fs.overwrite",
+        "process.exec", "repo.write", "document.modify",
+    }
     def __init__(self, config: AgentConfig, registry: SkillRegistry, session_dir: Path, cancel_event: Event | None = None):
         self.config = config
         self.registry = registry
         self.session_dir = session_dir
-        self.literature = LiteratureService(config, session_dir, cancel_event)
+        self.workspace_context = WorkspaceContext.for_session(session_dir)
+        workspace_root = self.workspace_context.workspace_root
+        self.literature = LiteratureService(config, workspace_root, cancel_event)
         self.writing = WritingService(config, session_dir, cancel_event)
-        self.files = FileService(session_dir)
-        self.documents = DocumentService(session_dir)
-        self.rag = RagService(config, session_dir, cancel_event)
-        self.references = ReferenceService(config, session_dir)
-        self.data = ExperimentAnalysisService(session_dir)
-        self.charts = ChartService(session_dir)
-        self.data_transform = DataTransformService(session_dir)
+        self.files = FileService(self.workspace_context)
+        self.documents = DocumentService(workspace_root)
+        self.rag = RagService(config, workspace_root, cancel_event)
+        self.references = ReferenceService(config, workspace_root)
+        self.data = ExperimentAnalysisService(workspace_root)
+        self.charts = ChartService(self.workspace_context)
+        self.data_transform = DataTransformService(workspace_root)
         self.quality = QualityAuditService(session_dir)
-        self.arxiv = ArxivReaderService(config, session_dir, cancel_event)
-        self.workspace = WorkspaceService(config.root_dir, session_dir)
-        self.papers = PaperAcquisitionService(session_dir)
+        self.arxiv = ArxivReaderService(config, workspace_root, cancel_event)
+        self.workspace = WorkspaceService(config.root_dir, session_dir, self.workspace_context)
+        self.papers = PaperAcquisitionService(workspace_root)
         self.web_search = WebSearchService()
         self.http_web_search = HttpWebSearchService()
-        self.code_runner = CodeRunnerService()
-        self.web_fetch = WebFetchService()
-        self.git = GitService()
-        self.shell = ShellService()
-        self.officecli = OfficeCLIService()
-        self.office_md = OfficeAndMdService(session_dir)
+        self.code_runner = CodeRunnerService(self.workspace_context)
+        self.web_fetch = WebFetchService(self.workspace_context)
+        self.git = GitService(self.workspace_context)
+        self.shell = ShellService(self.workspace_context)
+        self.officecli = OfficeCLIService(self.workspace_context)
+        self.office_md = OfficeAndMdService(workspace_root)
         self.confirmation_policies: dict[str, Callable[[dict[str, Any]], bool]] = {
             "workspace_files": self.workspace.requires_confirmation,
+        }
+        self.effect_policies: dict[str, Callable[[dict[str, Any]], set[str]]] = {
+            "workspace_files": self.workspace.effects,
         }
         self.handlers: dict[str, Callable[[dict[str, Any], ChatSession], dict[str, Any]]] = {
             "search_literature": self._search,
@@ -73,6 +82,7 @@ class ToolExecutor:
             "generate_chart": self._chart,
             "format_references": self._references,
             "write_review": self._review,
+            "compose_manuscript": lambda args, session: self.writing.compose_manuscript(args, session.artifacts),
             "read_arxiv": lambda args, session: self.arxiv.read(args),
             "write_paper_section": lambda args, session: self.writing.transform("write_paper_section", args, session.artifacts),
             "revise_document": lambda args, session: self.writing.transform("revise_document", args, session.artifacts),
@@ -101,16 +111,29 @@ class ToolExecutor:
             "md_to_office": lambda args, session: self.office_md.to_office(args, session.artifacts),
         }
 
-    def requires_confirmation(self, skill_name: str, arguments: dict[str, Any]) -> bool:
+    def requires_confirmation(self, skill_name: str, arguments: dict[str, Any], session: ChatSession | None = None) -> bool:
         """Return the tool-owned permission policy for this exact operation."""
         spec = self.registry.get(skill_name)
-        if not spec.requires_confirmation:
-            return False
         privacy = {
             **DEFAULT_PRIVACY,
             **dict(platform_setting(self.config.runs_dir, "privacy", {}) or {}),
         }
         if not privacy["approval_required"]:
+            return False
+        effects = set(spec.effects)
+        if spec.network_access:
+            effects.add("network.read")
+        if spec.write_access:
+            effects.add("artifact.create")
+        effect_policy = self.effect_policies.get(spec.handler or "")
+        if effect_policy:
+            effects.update(effect_policy(arguments))
+        mode = str(getattr(session, "metadata", {}).get("approval_mode", "manual") if session else "manual")
+        if mode == "auto":
+            return bool(effects & self.SENSITIVE_EFFECTS)
+        if effects & {"credential.read", "external.side_effect", "process.exec", "repo.write"}:
+            return True
+        if not spec.requires_confirmation:
             return False
         policy = self.confirmation_policies.get(spec.handler or "")
         return policy(arguments) if policy else True
@@ -131,15 +154,20 @@ class ToolExecutor:
         handler = self.handlers.get(spec.handler)
         if handler is None:
             raise ValueError(f"No local handler for skill: {skill_name}")
-        validate_arguments(spec.input_schema, arguments)
+        scoped_arguments = self._scope_workspace_paths(spec.workspace_paths, arguments)
+        validate_arguments(spec.input_schema, scoped_arguments)
         missing_artifacts = has_required_artifacts(session, spec.consumes, self.registry)
         if missing_artifacts:
+            producers = {
+                artifact_type: self.registry.producers_for(artifact_type)
+                for artifact_type in missing_artifacts
+            }
             raise ContractError(
                 "missing_artifact",
                 f"工具需要的成果物不存在: {', '.join(missing_artifacts)}",
-                details={"required": missing_artifacts},
+                details={"required": missing_artifacts, "available_producers": producers},
             )
-        result = handler(dict(arguments), session)
+        result = handler(scoped_arguments, session)
         if not isinstance(result, dict) or "message" not in result:
             raise TypeError(f"Invalid handler result from {skill_name}")
         result.setdefault("artifacts", {})
@@ -156,6 +184,20 @@ class ToolExecutor:
             raise ContractError("invalid_tool_output", f"工具 {skill_name} 返回了无效结果")
         validate_result_quality(result)
         return result
+
+    def _scope_workspace_paths(self, fields: tuple[str, ...], arguments: dict[str, Any]) -> dict[str, Any]:
+        scoped = dict(arguments)
+        for field in fields:
+            value = scoped.get(field)
+            if value in (None, "", []):
+                continue
+            if isinstance(value, list):
+                scoped[field] = [str(self.workspace_context.resolve(str(item))) for item in value if str(item).strip()]
+            elif isinstance(value, str):
+                scoped[field] = str(self.workspace_context.resolve(value))
+            else:
+                raise ValueError(f"{field} 必须是工作区路径或路径列表")
+        return scoped
 
     def status(self, session: ChatSession) -> dict[str, Any]:
         lines = [

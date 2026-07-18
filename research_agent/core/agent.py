@@ -159,7 +159,10 @@ class AgentLoop:
         user_message: str,
         state: LoopState,
     ) -> AgentResult:
-        base_tools = self.prompts.tools_for_llm(read_only=(session.status == "planning"))
+        base_tools = self.prompts.tools_for_llm(
+            read_only=(session.status == "planning"),
+            mode="planning" if session.status == "planning" else "active",
+        )
         turn = 0
         while True:
             turn += 1
@@ -236,10 +239,14 @@ class AgentLoop:
                         return self._finish_with_fallback(session, state.last_success, state.last_skill, messages, "empty_model_response")
                     return self._model_unavailable(session, result.outcome, result.error or "empty_model_response")
                 if session.status == "planning":
-                    return self._pause_for_plan_approval(session, message, messages, user_message, state)
+                    return self._finish_planning_message(session, message, state.last_skill, messages)
                 return self._finish(session, message, state.last_skill, messages)
 
-            if session.status != "planning" and self._batch_requires_confirmation(result.tool_calls, state):
+            control_result = self._handle_control_calls(session, result.tool_calls, messages, user_message, state)
+            if control_result:
+                return control_result
+
+            if session.status != "planning" and self._batch_requires_confirmation(result.tool_calls, state, session):
                 return self._pause_for_tool_approval(session, result.tool_calls, messages, user_message, state)
 
             stopped = self._execute_calls(session, messages, result.tool_calls, user_message, state, turn=turn)
@@ -248,7 +255,34 @@ class AgentLoop:
             session.model_messages = list(messages)
             self.sessions.save(session)
 
-    def _batch_requires_confirmation(self, raw_calls: list[dict[str, Any]], state: LoopState) -> bool:
+    def _handle_control_calls(
+        self,
+        session: ChatSession,
+        raw_calls: list[dict[str, Any]],
+        messages: list[dict[str, Any]],
+        user_message: str,
+        state: LoopState,
+    ) -> AgentResult | None:
+        for raw_call in raw_calls:
+            function = raw_call.get("function") if isinstance(raw_call.get("function"), dict) else {}
+            arguments, error = self._arguments(function.get("arguments"))
+            if error:
+                continue
+            try:
+                spec = self.registry.resolve(str(function.get("name") or "").strip())
+            except KeyError:
+                continue
+            if not spec.control_action:
+                continue
+            if spec.control_action == "plan_approval" and session.status == "planning":
+                content = str(arguments.get("content") or "").strip()
+                if not content:
+                    raise ContractError("missing_argument", "完成的计划内容不能为空")
+                messages[-1] = {"role": "assistant", "content": content}
+                return self._pause_for_plan_approval(session, content, messages, user_message, state)
+        return None
+
+    def _batch_requires_confirmation(self, raw_calls: list[dict[str, Any]], state: LoopState, session: ChatSession) -> bool:
         for raw_call in raw_calls:
             function = raw_call.get("function") if isinstance(raw_call.get("function"), dict) else {}
             arguments, error = self._arguments(function.get("arguments"))
@@ -261,7 +295,7 @@ class AgentLoop:
             call_key = f"{spec.name}:{json.dumps(arguments, ensure_ascii=False, sort_keys=True, default=str)}"
             if call_key in state.seen_calls:
                 continue
-            if self.executor.requires_confirmation(spec.name, arguments):
+            if self.executor.requires_confirmation(spec.name, arguments, session):
                 return True
         return False
 
@@ -519,6 +553,21 @@ class AgentLoop:
         self.sessions.event(session, "approval_requested", summary="Plan 已完成。是否执行？", approval_type="plan")
         self.sessions.save(session)
         return AgentResult(message, state.last_skill, waiting=True)
+
+    def _finish_planning_message(
+        self,
+        session: ChatSession,
+        message: str,
+        skill: str,
+        model_messages: list[dict[str, Any]],
+    ) -> AgentResult:
+        session.model_messages = list(model_messages)
+        session.status = "planning"
+        session.pending_action = None
+        session.add_message("assistant", message, skill=skill)
+        self.sessions.event(session, "planning_message", skill, message)
+        self.sessions.save(session)
+        return AgentResult(message, skill)
 
     def _conversation(self, session: ChatSession, user_message: str) -> list[dict[str, Any]]:
         if session.model_messages:

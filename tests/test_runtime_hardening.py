@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import unittest
+import uuid
 from threading import Event
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,6 +14,11 @@ from research_agent.capabilities.references import ReferenceService
 from research_agent.capabilities.documents import DocumentService
 from research_agent.session import ChatSession, SessionStore
 from research_agent.capabilities.workspace import WorkspaceService
+from research_agent.capabilities.workspace import WorkspaceContext
+from research_agent.capabilities.shell import ShellService
+from research_agent.capabilities.git_ops import GitService
+from research_agent.capabilities.web_fetch import WebFetchService
+from research_agent.capabilities.officecli import OfficeCLIService, _officecli_path
 from research_agent.config import AgentConfig
 from research_agent.logging import ModelCallLogger
 from research_agent.tools.llm_client import LLMClient
@@ -25,7 +31,7 @@ class RuntimeHardeningTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = ROOT / ".test_runs" / self.id().replace(".", "_")
         shutil.rmtree(self.tmp, ignore_errors=True)
-        self.tmp.mkdir(parents=True)
+        self.tmp.mkdir(parents=True, exist_ok=True)
 
     def tearDown(self) -> None:
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -51,7 +57,9 @@ class RuntimeHardeningTests(unittest.TestCase):
             "RESEARCH_AGENT_STRUCTURED_LLM_MAX_TOKENS=2048\n"
             "RESEARCH_AGENT_STRUCTURED_LLM_RETRY=2\n"
             "RESEARCH_AGENT_LITERATURE_MAX_BATCH_QUERIES=3\n"
-            "RESEARCH_AGENT_LITERATURE_SCREENING_LIMIT=17\n",
+            "RESEARCH_AGENT_LITERATURE_SCREENING_LIMIT=17\n"
+            "RESEARCH_AGENT_MANUSCRIPT_MIN_CHARS=1500\n"
+            "RESEARCH_AGENT_MANUSCRIPT_MIN_HEADINGS=8\n",
             encoding="utf-8",
         )
         config = AgentConfig.load(self.tmp)
@@ -60,6 +68,8 @@ class RuntimeHardeningTests(unittest.TestCase):
         self.assertEqual(config.structured_llm_retry, 2)
         self.assertEqual(config.literature_max_batch_queries, 3)
         self.assertEqual(config.literature_screening_limit, 17)
+        self.assertEqual(config.manuscript_min_chars, 1500)
+        self.assertEqual(config.manuscript_min_headings, 8)
 
     def test_pre_cancelled_model_call_never_touches_network(self) -> None:
         event = Event()
@@ -69,7 +79,8 @@ class RuntimeHardeningTests(unittest.TestCase):
         self.assertFalse(result.used_remote_model)
 
     def test_workspace_delete_requires_confirmation_and_is_reversible(self) -> None:
-        source = self.tmp / "source.txt"
+        source = self.tmp / "session" / "workspace" / "source.txt"
+        source.parent.mkdir(parents=True, exist_ok=True)
         source.write_text("keep", encoding="utf-8")
         service = WorkspaceService(self.tmp, self.tmp / "session")
         with self.assertRaises(ValueError):
@@ -77,6 +88,29 @@ class RuntimeHardeningTests(unittest.TestCase):
         result = service.operate({"operation": "delete", "path": "source.txt", "confirmed": True})
         self.assertFalse(source.exists())
         self.assertTrue(Path(result["artifacts"]["recycled_file"]).exists())
+
+    def test_process_tools_default_to_the_session_workspace(self) -> None:
+        context = WorkspaceContext.for_session(self.tmp / "session")
+        shell = ShellService(context).run({"command": "(Get-Location).Path"})
+        self.assertEqual(Path(shell["message"]).resolve(), context.workspace_root)
+        git = GitService(context).run({"command": "status"})
+        self.assertEqual(Path(git["data"]["cwd"]).resolve(), context.workspace_root)
+
+    def test_git_and_web_download_reject_paths_outside_the_session_workspace(self) -> None:
+        context = WorkspaceContext.for_session(self.tmp / "session")
+        with self.assertRaises(ValueError):
+            GitService(context).run({"command": "status", "cwd": str(self.tmp / "outside")})
+        with self.assertRaises(ValueError):
+            WebFetchService(context).fetch({"url": "https://example.test/file.pdf", "output_dir": str(self.tmp / "outside")})
+
+    @unittest.skipUnless(_officecli_path(), "officecli is not available")
+    def test_officecli_creates_a_docx_inside_the_session_workspace(self) -> None:
+        context = WorkspaceContext.for_session(self.tmp / "session")
+        result = OfficeCLIService(context).run({"command": "create", "file": f"artifacts/office-smoke-{uuid.uuid4().hex}.docx"})
+        document = Path(result["artifacts"]["office_document"])
+        self.assertTrue(document.exists())
+        self.assertEqual(document.suffix.lower(), ".docx")
+        self.assertIn(context.workspace_root, document.parents)
 
     def test_open_access_download_rejects_non_pdf(self) -> None:
         papers = self.tmp / "papers.json"

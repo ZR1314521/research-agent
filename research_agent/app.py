@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import atexit
 import json
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,10 @@ class RunCreateRequest(BaseModel):
 
 class MessageRequest(BaseModel):
     message: str
+
+
+class ApprovalModeRequest(BaseModel):
+    mode: str
 
 
 def create_app(agent: ResearchChatAgent | None = None) -> Any:
@@ -98,14 +103,15 @@ def create_app(agent: ResearchChatAgent | None = None) -> Any:
 
     async def save_upload(run_id: str, files: list[UploadFile]) -> dict[str, Any]:
         session = load_run(run_id)
-        incoming = agent.sessions.directory(run_id) / "incoming_uploads"
-        incoming.mkdir(parents=True, exist_ok=True)
+        executor = ToolExecutor(agent.config, agent.registry, agent.sessions.directory(run_id))
+        incoming = executor.workspace_context.uploads_root
         paths: list[str] = []
         for upload in files:
             path = incoming / Path(upload.filename or "upload.bin").name
+            if path.exists():
+                path = incoming / f"{path.stem}-{uuid.uuid4().hex[:8]}{path.suffix}"
             path.write_bytes(await upload.read())
             paths.append(str(path))
-        executor = ToolExecutor(agent.config, agent.registry, agent.sessions.directory(run_id))
         result = executor.execute("file-upload-router", {"paths": paths}, session)
         session.artifacts.update({key: str(value) for key, value in result["artifacts"].items()})
         register_artifacts(session, agent.registry.get("file-upload-router"), result["artifacts"])
@@ -436,6 +442,17 @@ def create_app(agent: ResearchChatAgent | None = None) -> Any:
         load_run(run_id)
         return {"run_id": run_id, "status": coordinator.resume(run_id)}
 
+    @app.post("/runs/{run_id}/approval-mode")
+    def set_approval_mode(run_id: str, request: ApprovalModeRequest):
+        session = load_run(run_id)
+        mode = str(request.mode or "").strip().lower()
+        if mode not in {"manual", "auto"}:
+            raise HTTPException(status_code=400, detail="approval mode must be manual or auto")
+        session.metadata["approval_mode"] = mode
+        agent.sessions.event(session, "approval_mode_changed", summary=mode, mode=mode)
+        agent.sessions.save(session)
+        return _run_payload(session)
+
     @app.post("/runs/{run_id}/intervene")
     def intervene_run(run_id: str, request: MessageRequest):
         load_run(run_id)
@@ -755,6 +772,7 @@ def _run_payload(session: Any, active_turn_status: str = "") -> dict[str, Any]:
         "latest_assistant_message": latest_assistant,
         "pending_action": session.pending_action,
         "plan_mode": session.metadata.get("plan_mode", False),
+        "approval_mode": session.metadata.get("approval_mode", "manual"),
         "context_size": context_size,
         "window_size": window,
         "messages": [{"role": m.get("role"), "content": m.get("content", "")} for m in session.messages[-30:]],

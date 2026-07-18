@@ -63,6 +63,8 @@ class AgentConfig:
     literature_request_delay_seconds: float
     literature_max_batch_queries: int
     literature_screening_limit: int
+    manuscript_min_chars: int
+    manuscript_min_headings: int
 
     @classmethod
     def load(cls, root_dir: Path | None = None) -> "AgentConfig":
@@ -132,6 +134,12 @@ class AgentConfig:
             ),
             literature_screening_limit=max(
                 1, int(_value(values, "RESEARCH_AGENT_LITERATURE_SCREENING_LIMIT", "20"))
+            ),
+            manuscript_min_chars=max(
+                1, int(_value(values, "RESEARCH_AGENT_MANUSCRIPT_MIN_CHARS", "1200"))
+            ),
+            manuscript_min_headings=max(
+                1, int(_value(values, "RESEARCH_AGENT_MANUSCRIPT_MIN_HEADINGS", "7"))
             ),
         )
 

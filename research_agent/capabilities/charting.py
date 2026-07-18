@@ -4,6 +4,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from research_agent.capabilities.workspace import WorkspaceContext
+
 
 SUPPORTED_CHART_TYPES = {"line", "scatter", "bar", "histogram", "box", "heatmap"}
 SUPPORTED_OUTPUT_FORMATS = {"png", "svg"}
@@ -12,8 +14,9 @@ SUPPORTED_OUTPUT_FORMATS = {"png", "svg"}
 class ChartService:
     """Render an explicit chart specification without interpreting user intent."""
 
-    def __init__(self, session_dir: Path):
-        self.session_dir = Path(session_dir)
+    def __init__(self, session_dir: Path | WorkspaceContext):
+        self.context = session_dir if isinstance(session_dir, WorkspaceContext) else WorkspaceContext.for_session(session_dir)
+        self.session_dir = self.context.session_root
 
     def render(self, arguments: dict[str, Any]) -> dict[str, Any]:
         source = self._source(arguments)
@@ -53,7 +56,7 @@ class ChartService:
             axis.set_ylabel(str(arguments["y_label"]))
         axis.grid(chart_type in {"line", "scatter", "bar"}, alpha=0.2)
 
-        output_dir = self.session_dir / "artifacts" / "charts"
+        output_dir = self.context.artifacts_root / "charts"
         output_dir.mkdir(parents=True, exist_ok=True)
         output = output_dir / f"chart_{uuid.uuid4().hex[:12]}.{output_format}"
         figure.savefig(output, dpi=180 if output_format == "png" else None, format=output_format)
@@ -88,7 +91,7 @@ class ChartService:
         raw = str(arguments.get("path") or "").strip()
         if not raw:
             raise ValueError("Chart source path is required")
-        source = Path(raw).expanduser().resolve()
+        source = self.context.resolve(raw)
         if not source.exists() or not source.is_file():
             raise FileNotFoundError(f"Chart source file not found: {source}")
         return source

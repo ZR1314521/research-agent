@@ -178,7 +178,8 @@ class AcceptanceTests(unittest.TestCase):
 
     def test_reference_formats_include_human_audit_for_missing_metadata(self) -> None:
         session = self.agent.new_session()
-        bib = self.tmp / "refs.bib"
+        bib = self.agent.sessions.directory(session.session_id) / "workspace" / "uploads" / "refs.bib"
+        bib.parent.mkdir(parents=True, exist_ok=True)
         bib.write_text(
             "@article{li2024,\n"
             "author={Li, Wei and Zhang, San},\n"
@@ -212,7 +213,8 @@ class AcceptanceTests(unittest.TestCase):
         self.assertEqual(response.skill, "docx")
         self.assertEqual(Path(response.session.artifacts["docx_output"]).name, "test.docx")
 
-        report = self.agent.sessions.directory(session.session_id) / "analysis_report.md"
+        report = self.agent.sessions.directory(session.session_id) / "workspace" / "artifacts" / "analysis_report.md"
+        report.parent.mkdir(parents=True, exist_ok=True)
         report.write_text("# Analysis\n\nok\n", encoding="utf-8")
         session.artifacts["analysis_report"] = str(report)
         self.agent.sessions.save(session)
@@ -227,7 +229,9 @@ class AcceptanceTests(unittest.TestCase):
     def test_explicit_docx_explanation_returns_summary_and_preserves_source(self) -> None:
         from zipfile import ZIP_DEFLATED, ZipFile
 
-        source = self.tmp / "known-paper.docx"
+        session = self.agent.new_session()
+        source = self.agent.sessions.directory(session.session_id) / "workspace" / "uploads" / "known-paper.docx"
+        source.parent.mkdir(parents=True, exist_ok=True)
         with ZipFile(source, "w", ZIP_DEFLATED) as archive:
             archive.writestr("[Content_Types].xml", '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>')
             archive.writestr("_rels/.rels", '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>')
@@ -242,7 +246,7 @@ class AcceptanceTests(unittest.TestCase):
         before = source.read_bytes()
 
         response = self.model_handle(
-            session := self.agent.new_session(), f'请用中文解释 "{source}" 这篇论文讲了什么',
+            session, f'请用中文解释 "{source}" 这篇论文讲了什么',
             model_tool("document-summary", {"path": str(source)}),
             generated="## 问题\n\n有限标注下的 EEG 分类。\n\n## 方法\n\n紧凑神经网络。",
         )
@@ -254,11 +258,13 @@ class AcceptanceTests(unittest.TestCase):
         self.assertEqual(source.read_bytes(), before)
 
     def test_explicit_markdown_explanation_uses_document_summary(self) -> None:
-        source = self.tmp / "known-paper.md"
+        session = self.agent.new_session()
+        source = self.agent.sessions.directory(session.session_id) / "workspace" / "uploads" / "known-paper.md"
+        source.parent.mkdir(parents=True, exist_ok=True)
         source.write_text("# Known paper\n\nThis document evaluates a classifier on a held-out cohort.", encoding="utf-8")
 
         response = self.model_handle(
-            self.agent.new_session(), f'请解释 "{source}" 讲了什么',
+            session, f'请解释 "{source}" 讲了什么',
             model_tool("document-summary", {"path": str(source)}),
             generated="## 问题\n\n分类器在留出队列上的评估。",
         )

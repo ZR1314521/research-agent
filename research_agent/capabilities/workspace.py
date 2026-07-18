@@ -2,20 +2,76 @@ from __future__ import annotations
 
 import json
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 
-class WorkspaceService:
-    """Safe, explicit file operations scoped to the project or session folder."""
+@dataclass(frozen=True)
+class WorkspaceContext:
+    """Per-session filesystem roots shared by all local capabilities."""
 
-    def __init__(self, root_dir: Path, session_dir: Path):
-        self.root_dir = root_dir.resolve()
-        self.session_dir = session_dir.resolve()
+    session_root: Path
+    workspace_root: Path
+    uploads_root: Path
+    artifacts_root: Path
+    temp_root: Path
+    recycle_root: Path
+
+    @classmethod
+    def for_session(cls, session_dir: Path) -> "WorkspaceContext":
+        session_root = Path(session_dir).resolve()
+        workspace_root = session_root / "workspace"
+        context = cls(
+            session_root=session_root,
+            workspace_root=workspace_root,
+            uploads_root=workspace_root / "uploads",
+            artifacts_root=workspace_root / "artifacts",
+            temp_root=workspace_root / "tmp",
+            recycle_root=workspace_root / ".recycle",
+        )
+        for folder in (context.workspace_root, context.uploads_root, context.artifacts_root, context.temp_root):
+            folder.mkdir(parents=True, exist_ok=True)
+        return context
+
+    def resolve(self, raw: str) -> Path:
+        value = str(raw or "").strip()
+        if value in {"", ".", "/", "\\"}:
+            candidate = self.workspace_root
+        else:
+            supplied = Path(value).expanduser()
+            candidate = supplied if supplied.is_absolute() else self.workspace_root / supplied
+        resolved = candidate.resolve()
+        if resolved != self.workspace_root and self.workspace_root not in resolved.parents:
+            raise ValueError("路径不属于当前会话工作区")
+        return resolved
+
+
+class WorkspaceService:
+    """Explicit file operations scoped to one session workspace."""
+
+    def __init__(self, root_dir: Path, session_dir: Path, context: WorkspaceContext | None = None):
+        self.project_root = Path(root_dir).resolve()
+        self.context = context or WorkspaceContext.for_session(session_dir)
+        self.root_dir = self.context.workspace_root
+        self.session_dir = self.context.session_root
 
     @staticmethod
     def requires_confirmation(arguments: dict[str, Any]) -> bool:
         return str(arguments.get("operation") or "").lower() in {"copy", "move", "write", "delete"}
+
+    def effects(self, arguments: dict[str, Any]) -> set[str]:
+        operation = str(arguments.get("operation") or "").lower()
+        if operation in {"list", "read", "search"}:
+            return {"fs.read"}
+        if operation == "delete":
+            return {"fs.delete"}
+        raw_target = arguments.get("target_path") if operation in {"copy", "move"} else arguments.get("path")
+        target = self._path(str(raw_target or ""))
+        effects = {"fs.overwrite" if target.exists() else "fs.create"}
+        if operation == "move":
+            effects.add("fs.delete")
+        return effects
 
     def operate(self, arguments: dict[str, Any]) -> dict[str, Any]:
         operation = str(arguments.get("operation") or "").lower()
@@ -104,7 +160,7 @@ class WorkspaceService:
             source = self._existing_file(arguments)
             if not arguments.get("confirmed"):
                 raise ValueError("delete is reversible but requires confirmed=true")
-            recycle = self.session_dir / ".recycle"
+            recycle = self.context.recycle_root
             recycle.mkdir(parents=True, exist_ok=True)
             target = recycle / source.name
             suffix = 2
@@ -122,7 +178,4 @@ class WorkspaceService:
         return path
 
     def _path(self, raw: str) -> Path:
-        if raw.strip() in {"", ".", "/", "\\"}:
-            return self.root_dir
-        path = Path(raw).expanduser()
-        return path.resolve() if path.is_absolute() else (self.root_dir / path).resolve()
+        return self.context.resolve(raw)

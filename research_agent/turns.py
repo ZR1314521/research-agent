@@ -140,9 +140,12 @@ class TurnControl:
 
     def resolve_approval(self, approved: bool) -> str:
         with self._condition:
+            if self.state == "resuming":
+                return self.state
             if self.state != "waiting_approval":
                 return self.state
             self._approval = approved
+            self.state = "resuming"
             self.emit("approval_resolved", {"approved": approved})
             self._condition.notify_all()
             return self.state

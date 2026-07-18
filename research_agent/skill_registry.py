@@ -33,6 +33,7 @@ DECLARED_CONTRACTS: dict[str, dict[str, Any]] = {
     "transform_data": {"input_schema": _schema({"path": "string", "ops": "array", "transform_ops": "array", "keep_columns": "array", "scale_columns": "array", "output_path": "string"}), "produces": ("Dataset",), "artifact_types": {"transformed_data": "Dataset", "latest_data": "Dataset", "data_transform_log": "File"}, "artifact_profiles": {"transformed_data": {"presentation": "primary", "label": "处理后的数据"}}},
     "format_references": {"input_schema": _schema({"path": "string", "styles": "array", "output_path": "string", "output_mode": "string", "convert_in_text": "boolean", "enrich_metadata": "boolean"}), "produces": ("ReferenceList", "NormalizedBibliography", "WordDocument"), "artifact_types": {"reference_input_normalized": "NormalizedBibliography", "reference_metadata_provenance": "File", "references_bib": "NormalizedBibliography", "citation_check_report": "ReferenceList", "reference_quality_report": "ReferenceList", "references_*": "ReferenceList", "formatted_document": "WordDocument", "nature_document": "WordDocument", "citation_audit": "ReferenceList"}, "artifact_profiles": {"references_*": {"presentation": "primary", "label": "格式化参考文献"}, "formatted_document": {"presentation": "primary", "label": "格式化后的文档"}, "nature_document": {"presentation": "primary", "label": "格式化后的文档"}, "citation_check_report": {"presentation": "supporting", "label": "引用校对报告"}, "reference_quality_report": {"presentation": "supporting", "label": "参考文献质量报告"}, "references_bib": {"presentation": "supporting", "label": "BibTeX 文献库"}, "citation_audit": {"presentation": "supporting", "label": "文中引用审计"}}},
     "write_review": {"input_schema": _schema({"stage": "string", "confirmed": "boolean"}), "consumes": ("EvidenceMatrix",), "produces": ("ReviewOutline", "ReviewDraft"), "artifact_types": {"review_framework": "ReviewOutline", "review_draft": "ReviewDraft"}, "artifact_profiles": {"review_framework": {"presentation": "primary", "label": "综述框架"}, "review_draft": {"presentation": "primary", "label": "综述初稿"}}},
+    "compose_manuscript": {"input_schema": _schema({"title": "string", "paper_type": "string", "language": "string", "target_venue": "string", "request": "string", "text": "string", "evidence_paths": "array", "manuscript_id": "string"}), "produces": ("ManuscriptDraft", "AuditReport"), "artifact_types": {"manuscript": "ManuscriptDraft", "manuscript_evidence_ledger": "EvidenceMatrix", "manuscript_citation_audit": "AuditReport", "manuscript_quality_report": "AuditReport"}, "artifact_profiles": {"manuscript": {"presentation": "primary", "label": "完整论文第一版"}, "manuscript_evidence_ledger": {"presentation": "supporting", "label": "论文证据账本"}, "manuscript_citation_audit": {"presentation": "supporting", "label": "引用审查"}, "manuscript_quality_report": {"presentation": "supporting", "label": "论文质量报告"}}},
     "read_arxiv": {"input_schema": _schema({"url": "string", "identifier": "string"}, any_of=("url", "identifier")), "produces": ("PaperPool",), "artifact_types": {"arxiv_summary": "ResearchText", "arxiv_full_text": "ResearchText", "arxiv_pdf": "OpenAccessPDF"}, "artifact_profiles": {"arxiv_summary": {"presentation": "primary", "label": "论文阅读摘要"}, "arxiv_pdf": {"presentation": "supporting", "label": "论文 PDF"}}},
     "write_paper_section": {"input_schema": _schema({"text": "string", "path": "string"}), "produces": ("ResearchText",), "artifact_profiles": {"write_paper_section": {"presentation": "primary", "label": "论文段落"}}},
     "revise_document": {"input_schema": _schema({"text": "string", "path": "string"}), "produces": ("ResearchText",), "artifact_profiles": {"revise_document": {"presentation": "primary", "label": "修订稿"}}},
@@ -46,6 +47,7 @@ DECLARED_CONTRACTS: dict[str, dict[str, Any]] = {
     "quality_audit": {"input_schema": _schema({}), "produces": ("AuditReport",), "artifact_profiles": {"quality_audit": {"presentation": "primary", "label": "质量审查报告"}}},
     "session_status": {"input_schema": _schema({}), "produces": ("SessionState",)},
     "workspace_files": {"input_schema": _schema({"operation": "string", "path": "string", "target_path": "string", "text": "string", "query": "string", "offset": "integer", "limit": "integer", "tail": "boolean", "max_results": "integer", "confirmed": "boolean"}, required=("operation",)), "produces": ("File",), "artifact_types": {"workspace_file": "File", "recycled_file": "File"}},
+    "present_plan": {"input_schema": _schema({"content": "string"}, required=("content",))},
     "acquire_open_access_papers": {"input_schema": _schema({"indexes": "array", "output_dir": "string"}), "consumes": ("PaperPool",), "produces": ("OpenAccessPDF",), "artifact_types": {"open_access_manifest": "File", "open_access_pdf_*": "OpenAccessPDF"}, "artifact_profiles": {"open_access_pdf_*": {"presentation": "supporting", "label": "开放获取论文"}, "open_access_manifest": {"presentation": "supporting", "label": "论文下载清单"}}},
     "create_reading_copy": {"input_schema": _schema({"output_name": "string"}), "consumes": ("OpenAccessPDF",), "produces": ("WordDocument",), "artifact_types": {"reading_copy_docx": "WordDocument"}, "artifact_profiles": {"reading_copy_docx": {"presentation": "primary", "label": "论文阅读副本"}}},
     "web_search": {"input_schema": _schema({"query": "string", "site": "string", "limit": "integer"}, required=("query", "site")), "produces": ("WebSearchResults",)},
@@ -56,7 +58,37 @@ DECLARED_CONTRACTS: dict[str, dict[str, Any]] = {
     "shell": {"input_schema": _schema({"command": "string"}, required=("command",)), "produces": ("File",)},
     "office_to_md": {"input_schema": _schema({"path": "string", "output_path": "string"}, required=("path",)), "produces": ("ResearchText",), "artifact_types": {"markdown_output": "ResearchText"}, "artifact_profiles": {"markdown_output": {"presentation": "primary", "label": "Markdown 文档"}}},
     "md_to_office": {"input_schema": _schema({"path": "string", "text": "string", "target_format": "string", "template": "string", "output_path": "string"}), "produces": ("WordDocument", "ResearchText"), "artifact_types": {"office_docx": "WordDocument", "office_pptx": "File", "office_pdf": "File"}, "artifact_profiles": {"office_*": {"presentation": "primary", "label": "导出的 Office 文档"}}},
+    "officecli": {"input_schema": _schema({"command": "string", "file": "string", "path": "string", "parent": "string", "type": "string", "selector": "string", "target_format": "string", "props": "object", "commands": "array"}, required=("command",)), "produces": ("WordDocument",), "artifact_types": {"office_document": "WordDocument"}, "artifact_profiles": {"office_document": {"presentation": "primary", "label": "Office 文档"}}},
 }
+
+# Filesystem arguments are declared as capability metadata.  The executor uses
+# this contract uniformly; it does not infer paths from keywords or tool names.
+WORKSPACE_PATH_CONTRACTS: dict[str, tuple[str, ...]] = {
+    "search_literature": ("output_path",),
+    "analyze_experiment": ("path",),
+    "generate_chart": ("path",),
+    "transform_data": ("path", "output_path"),
+    "format_references": ("path", "output_path"),
+    "compose_manuscript": ("evidence_paths",),
+    "write_paper_section": ("path",),
+    "revise_document": ("path",),
+    "humanize_text": ("path",),
+    "design_visual": ("path",),
+    "export_docx": ("path", "output_path"),
+    "document_convert": ("path", "output_path"),
+    "document_summary": ("path",),
+    "register_files": ("paths", "path", "local_file_path"),
+    "rag_query": ("paths",),
+    "workspace_files": ("path", "target_path"),
+    "acquire_open_access_papers": ("output_dir",),
+    "web_fetch": ("output_dir",),
+    "git": ("cwd",),
+    "office_to_md": ("path", "output_path"),
+    "md_to_office": ("path", "template", "output_path"),
+    "officecli": ("file",),
+}
+for _handler, _fields in WORKSPACE_PATH_CONTRACTS.items():
+    DECLARED_CONTRACTS[_handler]["workspace_paths"] = _fields
 OUTPUT_SCHEMA = {"required": ["message", "artifacts", "data"]}
 
 
@@ -82,6 +114,10 @@ class SkillSpec:
     direct_delivery: bool = False
     timeout_seconds: int = 60
     aliases: tuple[str, ...] = ()
+    effects: tuple[str, ...] = ()
+    control_action: str = ""
+    available_in: tuple[str, ...] = ()
+    workspace_paths: tuple[str, ...] = ()
 
 
 class SkillRegistry:
@@ -167,8 +203,23 @@ class SkillRegistry:
                 "parallel_safe": item.parallel_safe,
                 "batch_policy": item.batch_policy,
                 "direct_delivery": item.direct_delivery,
+                "effects": list(item.effects),
+                "control_action": item.control_action,
+                "available_in": list(item.available_in),
+                "workspace_paths": list(item.workspace_paths),
             })
         return result
+
+    def producers_for(self, artifact_type: str) -> list[str]:
+        """Return declared capabilities that can create an artifact type."""
+        seen: set[str] = set()
+        producers: list[str] = []
+        for item in self._skills.values():
+            if item.name in seen or artifact_type not in item.produces:
+                continue
+            seen.add(item.name)
+            producers.append(item.name)
+        return producers
 
     def instructions(self, name: str) -> str:
         self.get(name)

@@ -20,8 +20,8 @@ class WorkbenchStartupTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("-m uvicorn research_agent.app:app --host 127.0.0.1 --port 8878", result.stdout)
-        self.assertIn("--prefix", result.stdout)
-        self.assertIn("workbench start", result.stdout)
+        self.assertIn("npm start in", result.stdout)
+        self.assertIn(str(ROOT / "workbench"), result.stdout)
         self.assertIn(str(ROOT / ".venv" / "Scripts" / "python.exe"), result.stdout)
 
     def test_compatibility_check_reads_runtime_version_instead_of_copying_it(self) -> None:

@@ -90,6 +90,11 @@ class LocalWorkbenchApiTests(unittest.TestCase):
         uploaded = response.json()["data"]["files"]
         self.assertEqual(uploaded[0]["filename"], "study notes.txt")
         self.assertEqual(Path(uploaded[0]["stored_path"]).read_bytes(), b"original upload content")
+        self.assertEqual(
+            Path(uploaded[0]["stored_path"]).parent,
+            self.agent.sessions.directory(run_id) / "workspace" / "uploads",
+        )
+        self.assertFalse((self.agent.sessions.directory(run_id) / "incoming_uploads").exists())
 
     def test_multipart_upload_returns_current_sequenced_run_snapshot(self) -> None:
         created = self.client.post("/runs", json={}).json()
@@ -107,6 +112,17 @@ class LocalWorkbenchApiTests(unittest.TestCase):
         self.assertTrue(any(item["event"] == "tool_observed" for item in payload["events"]))
         sequences = [item["sequence"] for item in payload["events"]]
         self.assertEqual(sequences, list(dict.fromkeys(sequences)))
+
+    def test_auto_approval_mode_is_scoped_to_one_session(self) -> None:
+        first = self.client.post("/runs", json={}).json()["run_id"]
+        second = self.client.post("/runs", json={}).json()["run_id"]
+
+        changed = self.client.post(f"/runs/{first}/approval-mode", json={"mode": "auto"})
+
+        self.assertEqual(changed.status_code, 200, changed.text)
+        self.assertEqual(changed.json()["approval_mode"], "auto")
+        self.assertEqual(self.client.get(f"/runs/{first}").json()["approval_mode"], "auto")
+        self.assertEqual(self.client.get(f"/runs/{second}").json()["approval_mode"], "manual")
 
     def test_idle_sessions_are_not_reported_as_running_tasks(self) -> None:
         run_id = self.client.post("/runs", json={}).json()["run_id"]

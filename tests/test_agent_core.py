@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 from research_agent.config import AgentConfig
 from research_agent.context import ContextManager
 from research_agent.core.agent import AgentLoop
+from research_agent.executor import ToolExecutor
 from research_agent.core.contracts import ContractError, public_artifacts, refresh_artifact_profiles, register_artifacts, validate_result_quality
 from research_agent.core.prompt_runtime import PromptRuntime
 from research_agent.chat import ResearchChatAgent
@@ -687,12 +688,36 @@ class AgentCoreTests(unittest.TestCase):
         runtime = PromptRuntime(self.registry)
         before = runtime.system(self.session)
         self.session.artifacts["active_papers"] = "screened_papers.json"
+        self.session.artifact_records["active_papers"] = {
+            "type": "ScreenedPaperPool", "producer": "literature-screening", "path": "screened_papers.json",
+        }
 
         after = runtime.system(self.session)
         dynamic = runtime.runtime_context(self.session)
 
         self.assertEqual(before, after)
         self.assertIn("active_papers", dynamic)
+        self.assertIn("ScreenedPaperPool", dynamic)
+        self.assertIn("literature-screening", dynamic)
+        self.assertIn("screened_papers.json", dynamic)
+
+        self.session.artifacts["latest_papers"] = "screened_papers.json"
+        self.session.artifact_records["latest_papers"] = {
+            "type": "ScreenedPaperPool", "producer": "file-upload-router", "path": "screened_papers.json",
+        }
+        deduplicated = runtime.runtime_context(self.session)
+        self.assertEqual(deduplicated.count("path=screened_papers.json"), 1)
+
+    def test_model_tool_catalog_exposes_capabilities_without_prescribing_a_sequence(self) -> None:
+        runtime = PromptRuntime(self.registry)
+        tools = {item["function"]["name"]: item["function"] for item in runtime.tools_for_llm()}
+        review = tools["systematic-literature-review"]["description"]
+
+        self.assertIn("Consumes: EvidenceMatrix", review)
+        self.assertIn("Produces: ReviewOutline, ReviewDraft", review)
+        self.assertNotIn("must call", review.lower())
+        self.assertNotIn("then call", review.lower())
+        self.assertIn("literature-matrix-extraction", self.registry.producers_for("EvidenceMatrix"))
 
     def test_plan_safety_is_declared_by_capabilities_not_handler_name_checks(self) -> None:
         for name in (
@@ -704,6 +729,22 @@ class AgentCoreTests(unittest.TestCase):
             "run-code",
         ):
             self.assertTrue(self.registry.get(name).write_access, name)
+
+    def test_auto_mode_uses_declared_effects_and_resolved_workspace_targets(self) -> None:
+        executor = ToolExecutor(self.config, self.registry, self.sessions.directory(self.session.session_id))
+        self.session.metadata["approval_mode"] = "auto"
+
+        self.assertFalse(executor.requires_confirmation(
+            "workspace-files", {"operation": "write", "path": "new-note.md"}, self.session,
+        ))
+        target = executor.workspace_context.workspace_root / "existing.md"
+        target.write_text("existing", encoding="utf-8")
+        self.assertTrue(executor.requires_confirmation(
+            "workspace-files", {"operation": "write", "path": "existing.md"}, self.session,
+        ))
+        self.assertTrue(executor.requires_confirmation(
+            "run-code", {"code": "print('x')"}, self.session,
+        ))
 
     def test_unconfigured_model_does_not_echo_internal_prompt(self) -> None:
         object.__setattr__(self.config, "llm_api_key", "")
@@ -881,6 +922,54 @@ class AgentCoreTests(unittest.TestCase):
         self.assertIn("详细", prompt)
         self.assertTrue(Path(result["artifacts"]["document_summary"]).exists())
 
+    def test_complete_manuscript_first_version_is_grounded_and_audited(self) -> None:
+        service = WritingService(self.config, self.sessions.directory(self.session.session_id))
+        matrix = service.workspace.artifacts_root / "literature_matrix.json"
+        matrix.write_text(json.dumps([{
+            "citation_key": "li2024", "title": "Reliable EEG classification", "year": 2024,
+            "method": "subject-wise evaluation", "key_findings": "accuracy improved",
+            "evidence_scope": "abstract", "doi": "10.1000/example",
+        }], ensure_ascii=False), encoding="utf-8")
+        manuscript = "\n\n".join([
+            "# Reliability-aware EEG classification",
+            "## Abstract\n" + "This paper studies grounded EEG classification. " * 8,
+            "## Introduction\n" + "Prior evidence motivates subject-wise evaluation [@li2024]. " * 8,
+            "## Related work\n" + "Reliable evaluation has been reported in the supplied evidence [@li2024]. " * 8,
+            "## Method\n" + "The proposed study design is stated without inventing unavailable results. " * 8,
+            "## Results\n" + "The supplied evidence reports an accuracy improvement [@li2024]. " * 8,
+            "## Discussion\n" + "The interpretation remains limited to abstract-level evidence. " * 8,
+            "## Conclusion\n" + "The manuscript preserves the evidence boundary. " * 8,
+            "## References\n[@li2024] Reliable EEG classification. 2024. doi:10.1000/example",
+        ])
+
+        with patch.object(service.client, "complete", return_value=text_response(manuscript)):
+            result = service.compose_manuscript(
+                {"title": "Reliability-aware EEG classification", "paper_type": "empirical"},
+                {"literature_matrix_json": str(matrix)},
+            )
+
+        self.assertEqual(result["data"]["status"], "review_ready")
+        self.assertEqual(result["data"]["unknown_citations"], [])
+        self.assertIn("manuscript", result["artifacts"])
+        for path in result["artifacts"].values():
+            self.assertTrue(Path(path).exists())
+            self.assertIn(service.workspace.artifacts_root, Path(path).parents)
+
+    def test_manuscript_with_unsupported_claims_is_not_marked_review_ready(self) -> None:
+        service = WritingService(self.config, self.sessions.directory(self.session.session_id))
+        draft = "\n\n".join([
+            "# Draft", "## Abstract\nShort draft.", "## Introduction\nUnsupported [@fake2026].",
+            "## Method\n[EVIDENCE NEEDED: experiment protocol]", "## Results\nNo verified results.",
+            "## Discussion\nLimited evidence.", "## Conclusion\nDraft only.", "## References\nNone.",
+        ])
+        with patch.object(service.client, "complete", return_value=text_response(draft)):
+            result = service.compose_manuscript({"text": "User supplied research idea"}, {})
+
+        self.assertEqual(result["data"]["status"], "draft_with_gaps")
+        self.assertEqual(result["data"]["unknown_citations"], ["fake2026"])
+        report = Path(result["artifacts"]["manuscript_quality_report"]).read_text(encoding="utf-8")
+        self.assertIn("draft_with_gaps", report)
+
     def test_reference_service_extracts_references_from_docx(self) -> None:
         from docx import Document
 
@@ -957,7 +1046,9 @@ class AgentCoreTests(unittest.TestCase):
     def test_task_plan_is_model_generated_and_revisable(self) -> None:
         loop = AgentLoop(self.config, self.registry, self.sessions, self.sessions.directory(self.session.session_id))
         self.session.status = "planning"
-        with patch.object(loop.client, "chat", return_value=text_response("1. 读取文档\n2. 转换并验收")):
+        with patch.object(loop.client, "chat", return_value=tool_response(
+            "present-plan", {"content": "1. 读取文档\n2. 转换并验收"},
+        )):
             result = loop.run(self.session, "convert this document")
         self.assertTrue(result.waiting)
         self.assertEqual(self.session.pending_action["type"], "plan_approval")

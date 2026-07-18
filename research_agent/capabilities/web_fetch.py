@@ -5,9 +5,14 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from research_agent.capabilities.workspace import WorkspaceContext
+
 
 class WebFetchService:
     """Fetch a URL. Saves PDFs to disk, returns text content otherwise."""
+
+    def __init__(self, session_dir: Path | WorkspaceContext):
+        self.context = session_dir if isinstance(session_dir, WorkspaceContext) else WorkspaceContext.for_session(session_dir)
 
     def fetch(self, arguments: dict[str, Any]) -> dict[str, Any]:
         url = str(arguments.get("url", "")).strip()
@@ -15,6 +20,7 @@ class WebFetchService:
             raise ValueError("web_fetch requires a valid URL")
 
         timeout = int(arguments.get("timeout") or 30)
+        output_dir = self.context.resolve(str(arguments.get("output_dir") or "artifacts/downloads"))
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             content = resp.read(10 * 1024 * 1024 + 1)
@@ -23,7 +29,6 @@ class WebFetchService:
             raise ValueError("Response exceeds 10 MB limit")
 
         if content.startswith(b"%PDF"):
-            output_dir = Path(arguments.get("output_dir") or ".")
             output_dir.mkdir(parents=True, exist_ok=True)
             name = hashlib.sha256(url.encode()).hexdigest()[:12] + ".pdf"
             path = output_dir / name

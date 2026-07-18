@@ -173,9 +173,65 @@ def _is_inside_fence(text: str) -> bool:
     closed = any(p in text for p in (
         "</function_calls>", "</tool_calls>",
         "</" + _DB + "DSML" + _DB,
-        _DB + "DSML" + _DB,
     ))
     return opened and not closed
+
+
+class _ToolCallStreamFilter:
+    """Keep provider-serialized tool calls out of user-visible text deltas."""
+
+    _OPENERS = ("<function_calls", "<tool_calls", "<" + _DB + "DSML" + _DB)
+
+    def __init__(self) -> None:
+        self.buffer = ""
+        self.inside_protocol = False
+
+    def feed(self, fragment: str) -> str:
+        self.buffer += fragment
+        visible: list[str] = []
+        while self.buffer:
+            if self.inside_protocol:
+                complete = _DSML_OPEN.match(self.buffer)
+                if complete is None:
+                    break
+                self.buffer = self.buffer[complete.end():]
+                self.inside_protocol = False
+                continue
+
+            positions = [position for opener in self._OPENERS if (position := self.buffer.find(opener)) >= 0]
+            if positions:
+                start = min(positions)
+                if start:
+                    visible.append(self.buffer[:start])
+                    self.buffer = self.buffer[start:]
+                self.inside_protocol = True
+                continue
+
+            held = self._possible_opener_suffix(self.buffer)
+            if held:
+                visible.append(self.buffer[:-held])
+                self.buffer = self.buffer[-held:]
+            else:
+                visible.append(self.buffer)
+                self.buffer = ""
+            break
+        return "".join(visible)
+
+    def finish(self) -> str:
+        if self.inside_protocol:
+            self.buffer = ""
+            return ""
+        visible = self.buffer
+        self.buffer = ""
+        return visible
+
+    def _possible_opener_suffix(self, text: str) -> int:
+        maximum = 0
+        for opener in self._OPENERS:
+            for length in range(1, min(len(text), len(opener) - 1) + 1):
+                if text.endswith(opener[:length]):
+                    maximum = max(maximum, length)
+        return maximum
 
 
 def _normalize_response(data: Any) -> NormalizedResponse:
@@ -271,16 +327,7 @@ class OpenAICompatibleProvider:
         calls: dict[int, dict[str, Any]] = {}
         finish_reason = ""
         usage: dict[str, Any] = {}
-        # Buffer deltas so we can suppress DSML / XML tool-call text that
-        # some providers stream inside ``content``.  Once a complete block
-        # (or clean text) is assembled we flush the clean portion.
-        text_buf: list[str] = []
-        def _flush_clean() -> None:
-            merged = "".join(text_buf)
-            clean = _strip_tool_call_text(merged)
-            if clean:
-                on_event(ProviderEvent("assistant_delta", {"text": clean}))
-            text_buf.clear()
+        protocol_filter = _ToolCallStreamFilter()
         for raw in lines:
             line = raw.decode("utf-8", errors="replace").strip() if isinstance(raw, bytes) else str(raw).strip()
             if line.lstrip().lower().startswith(("<!", "<html")):
@@ -305,9 +352,9 @@ class OpenAICompatibleProvider:
             text = delta.get("content")
             if isinstance(text, str) and text:
                 content.append(text)
-                text_buf.append(text)
-                if not _is_inside_fence("".join(text_buf)):
-                    _flush_clean()
+                visible = protocol_filter.feed(text)
+                if visible:
+                    on_event(ProviderEvent("assistant_delta", {"text": visible}))
             thought = delta.get("reasoning_content")
             if isinstance(thought, str) and thought:
                 reasoning.append(thought)
@@ -327,7 +374,9 @@ class OpenAICompatibleProvider:
                     if function.get("arguments"):
                         call["function"]["arguments"] += str(function["arguments"])
                     on_event(ProviderEvent("tool_call_delta", {"index": index, "fragment": fragment}))
-        _flush_clean()
+        remaining = protocol_filter.finish()
+        if remaining:
+            on_event(ProviderEvent("assistant_delta", {"text": remaining}))
         raw_content = "".join(content)
         cleaned, extra_calls = _extract_tool_calls_from_content(raw_content)
         for ec in extra_calls:

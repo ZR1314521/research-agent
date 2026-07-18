@@ -379,3 +379,121 @@ test("a paused conversation accepts an adjustment in the same turn", async () =>
   await act(async () => root.unmount());
   container.remove();
 });
+
+test("approving a pending action renders the returned assistant message once", async () => {
+  window.history.replaceState(null, "", "#/home");
+  const waiting = {
+    ...run("run-approval", "论文计划已经准备好"),
+    status: "waiting_user",
+    pending_action: { type: "plan_approval", summary: "是否开始执行？" },
+  };
+  const completed = {
+    ...run("run-approval", "论文已经开始生成"),
+    status: "active",
+    assistant_message: "论文已经开始生成",
+    pending_action: null,
+  };
+  global.fetch = jest.fn((input, options = {}) => {
+    const url = String(input);
+    if (url.endsWith("/health")) return Promise.resolve(jsonResponse({}));
+    if (url.endsWith("/styles")) return Promise.resolve(jsonResponse([]));
+    if (url.endsWith("/settings/account")) return Promise.resolve(jsonResponse({}));
+    if (url.endsWith("/sessions")) return Promise.resolve(jsonResponse([]));
+    if (url.endsWith("/runs") && options.method === "POST") return Promise.resolve(jsonResponse(waiting));
+    if (url.endsWith("/runs/run-approval")) return Promise.resolve(jsonResponse(waiting));
+    if (url.endsWith("/runs/run-approval/approve")) return Promise.resolve(jsonResponse(completed));
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  await act(async () => { root.render(<App />); await Promise.resolve(); });
+  await act(async () => {
+    container.querySelector(".chat-cta").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  });
+  await act(async () => {
+    container.querySelector(".approve-action").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await Promise.resolve(); await Promise.resolve();
+  });
+
+  const matches = [...container.querySelectorAll(".message-content")]
+    .filter(node => node.textContent.includes("论文已经开始生成"));
+  expect(matches).toHaveLength(1);
+  await act(async () => root.unmount());
+  container.remove();
+});
+
+test("replayed stream sequences do not duplicate assistant text", async () => {
+  window.history.replaceState(null, "", "#/home");
+  const active = {
+    ...run("run-sequence", "已有上下文"),
+    active_turn: { turn_id: "turn-sequence", status: "running" },
+  };
+  global.fetch = jest.fn((input, options = {}) => {
+    const url = String(input);
+    if (url.endsWith("/health")) return Promise.resolve(jsonResponse({}));
+    if (url.endsWith("/styles")) return Promise.resolve(jsonResponse([]));
+    if (url.endsWith("/settings/account")) return Promise.resolve(jsonResponse({}));
+    if (url.endsWith("/sessions")) return Promise.resolve(jsonResponse([]));
+    if (url.endsWith("/runs") && options.method === "POST") return Promise.resolve(jsonResponse(active));
+    if (url.endsWith("/runs/run-sequence")) return Promise.resolve(jsonResponse(active));
+    if (url.includes("/runs/run-sequence/turns/turn-sequence/events")) {
+      return Promise.resolve(streamResponse([
+        { event: "turn_started", turn_id: "turn-sequence", sequence: 1 },
+        { event: "assistant_delta", turn_id: "turn-sequence", sequence: 2, text: "唯一增量" },
+        { event: "assistant_delta", turn_id: "turn-sequence", sequence: 2, text: "唯一增量" },
+      ]));
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  await act(async () => { root.render(<App />); await Promise.resolve(); });
+  await act(async () => {
+    container.querySelector(".chat-cta").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  });
+
+  expect(container.textContent.match(/唯一增量/g)).toHaveLength(1);
+  await act(async () => root.unmount());
+  container.remove();
+});
+
+test("auto approval is an explicit per-session control", async () => {
+  window.history.replaceState(null, "", "#/home");
+  const manual = { ...run("run-auto", "准备就绪"), approval_mode: "manual" };
+  const automatic = { ...manual, approval_mode: "auto" };
+  global.fetch = jest.fn((input, options = {}) => {
+    const url = String(input);
+    if (url.endsWith("/health")) return Promise.resolve(jsonResponse({}));
+    if (url.endsWith("/styles")) return Promise.resolve(jsonResponse([]));
+    if (url.endsWith("/settings/account")) return Promise.resolve(jsonResponse({}));
+    if (url.endsWith("/sessions")) return Promise.resolve(jsonResponse([]));
+    if (url.endsWith("/runs") && options.method === "POST") return Promise.resolve(jsonResponse(manual));
+    if (url.endsWith("/runs/run-auto")) return Promise.resolve(jsonResponse(manual));
+    if (url.endsWith("/runs/run-auto/approval-mode")) return Promise.resolve(jsonResponse(automatic));
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  await act(async () => { root.render(<App />); await Promise.resolve(); });
+  await act(async () => {
+    container.querySelector(".chat-cta").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  });
+  expect(container.querySelector(".auto-mode-toggle").textContent).toContain("Auto 关闭");
+  await act(async () => {
+    container.querySelector(".auto-mode-toggle").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await Promise.resolve(); await Promise.resolve();
+  });
+  expect(container.querySelector(".auto-mode-toggle").textContent).toContain("Auto 已开启");
+  expect(global.fetch.mock.calls.some(([input]) => String(input).endsWith("/approval-mode"))).toBe(true);
+  await act(async () => root.unmount());
+  container.remove();
+});

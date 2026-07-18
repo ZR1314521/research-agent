@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import re
+import uuid
 from pathlib import Path
 from threading import Event
 from typing import Any
@@ -11,6 +12,7 @@ from research_agent.config import AgentConfig
 from research_agent.context import ContextManager
 from research_agent.logging import ModelCallLogger
 from research_agent.tools.llm_client import LLMClient
+from research_agent.capabilities.workspace import WorkspaceContext
 
 
 MATRIX_FIELDS = [
@@ -51,6 +53,7 @@ class WritingService:
     def __init__(self, config: AgentConfig, session_dir: Path, cancel_event: Event | None = None):
         self.config = config
         self.session_dir = session_dir
+        self.workspace = WorkspaceContext.for_session(session_dir)
         self.client = LLMClient(config, ModelCallLogger(session_dir), cancel_event)
         self.context = ContextManager(session_dir, config.context_window)
 
@@ -176,7 +179,7 @@ class WritingService:
             temperature=0.1,
         )
         summary = result.text.strip() or fallback
-        path = self.session_dir / "document_summary.md"
+        path = self.workspace.artifacts_root / "document_summary.md"
         path.write_text(summary + "\n", encoding="utf-8")
         return {"message": summary, "artifacts": {"document_summary": str(path)}, "data": {"source_chars": len(source)}}
 
@@ -200,7 +203,9 @@ class WritingService:
         if stage == "draft" and arguments.get("confirmed") is not True:
             raise ValueError("生成综述初稿前需要用户确认大纲")
         if stage == "draft":
-            framework = self.session_dir / "review_framework.md"
+            framework = self.workspace.artifacts_root / "review_framework.md"
+            if not framework.exists():
+                framework = self.session_dir / "review_framework.md"
             if not framework.exists():
                 raise ValueError("a confirmed review outline is required before drafting")
             matrix = framework.read_text(encoding="utf-8", errors="ignore") + "\n\nEvidence:\n" + matrix
@@ -230,7 +235,7 @@ class WritingService:
         if not result.used_remote_model or not result.text.strip():
             raise RuntimeError("模型不可用，未生成综述；已有论文和矩阵已保留。")
         self._validate_review(result.text, papers, matrix)
-        path = self.session_dir / ("review_framework.md" if stage == "outline" else "review_draft.md")
+        path = self.workspace.artifacts_root / ("review_framework.md" if stage == "outline" else "review_draft.md")
         path.write_text(result.text.strip() + "\n", encoding="utf-8")
         preview = result.text.strip()[:1600]
         return {
@@ -238,6 +243,153 @@ class WritingService:
             "artifacts": {"review_framework" if stage == "outline" else "review_draft": str(path)},
             "data": {"preview": preview, "stage": stage, "requires_confirmation": stage == "outline"},
         }
+
+    def compose_manuscript(self, arguments: dict[str, Any], artifacts: dict[str, str]) -> dict[str, Any]:
+        """Create one evidence-audited manuscript draft without imposing a tool sequence."""
+        title = str(arguments.get("title") or "Untitled manuscript").strip()
+        paper_type = str(arguments.get("paper_type") or "research").strip().lower()
+        language = str(arguments.get("language") or "follow the user's language").strip()
+        target_venue = str(arguments.get("target_venue") or "unspecified").strip()
+        evidence, citations, skipped = self._manuscript_evidence(arguments, artifacts)
+        if not evidence:
+            raise ValueError("没有可用于完整论文写作的会话证据；请提供材料、文献矩阵或实验结果")
+
+        evidence_text = self.context.fit_text(
+            json.dumps(evidence, ensure_ascii=False, indent=2),
+            label="manuscript-evidence",
+            occupied={"title": title, "paper_type": paper_type, "target_venue": target_venue},
+            reserve_tokens=self.config.context_window // 3,
+        )
+        known_keys = sorted(citations)
+        prompt = (
+            f"Title: {title}\nPaper type: {paper_type}\nLanguage: {language}\nTarget venue: {target_venue}\n"
+            f"User request: {str(arguments.get('request') or '')}\n\n"
+            "Write a complete scholarly manuscript with title, abstract, keywords, body sections appropriate to the "
+            "paper type, limitations, conclusion, and references. Decide the section structure from the paper type and "
+            "target venue; do not follow a fixed tool workflow. Every factual result or literature claim must be grounded "
+            "in the supplied evidence. Cite only the supplied citation keys using [@key]. Never invent citations, datasets, "
+            "metrics, experiments, or findings. When required evidence is absent, write [EVIDENCE NEEDED: concise reason] "
+            "instead of filling the gap. Distinguish metadata, abstract, full-text, and user-analysis evidence.\n"
+            f"Allowed citation keys: {', '.join(known_keys) or '(none)'}\n\nEvidence:\n{evidence_text}"
+        )
+        result = self.client.complete(
+            "manuscript_writing",
+            prompt,
+            fallback="",
+            system="You write complete evidence-grounded academic manuscripts and never fabricate claims or references.",
+            temperature=0.2,
+        )
+        if not result.used_remote_model or not result.text.strip():
+            raise RuntimeError("模型不可用，未生成论文；会话证据仍然保留")
+
+        manuscript = result.text.strip()
+        cited = sorted(set(re.findall(r"\[@([A-Za-z0-9_.:-]+)\]", manuscript)))
+        unknown = sorted(set(cited) - set(known_keys))
+        placeholders = re.findall(r"\[(?:EVIDENCE NEEDED|待补|TODO|TBD)[^\]]*\]", manuscript, flags=re.IGNORECASE)
+        headings = len(re.findall(r"^#{1,4}\s+", manuscript, flags=re.MULTILINE))
+        has_references = bool(re.search(r"^#{1,4}\s+(?:References|参考文献)\s*$", manuscript, flags=re.MULTILINE | re.IGNORECASE))
+        status = "review_ready" if (
+            len(manuscript) >= self.config.manuscript_min_chars
+            and headings >= self.config.manuscript_min_headings
+            and has_references and not unknown and not placeholders
+        ) else "draft_with_gaps"
+
+        requested_id = re.sub(r"[^A-Za-z0-9._-]+", "-", str(arguments.get("manuscript_id") or "").strip()).strip(".-")
+        manuscript_id = requested_id or f"manuscript-{uuid.uuid4().hex[:12]}"
+        output_dir = self.workspace.artifacts_root / "manuscripts" / manuscript_id
+        output_dir.mkdir(parents=True, exist_ok=True)
+        manuscript_path = output_dir / "manuscript.md"
+        ledger_path = output_dir / "evidence_ledger.json"
+        citation_path = output_dir / "citation_audit.md"
+        quality_path = output_dir / "manuscript_quality_report.md"
+        manuscript_path.write_text(manuscript + "\n", encoding="utf-8")
+        ledger_path.write_text(json.dumps({
+            "manuscript_id": manuscript_id, "sources": evidence, "citations": list(citations.values()),
+            "skipped_sources": skipped,
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        citation_path.write_text(
+            "# Citation audit\n\n"
+            f"- Allowed citation keys: {len(known_keys)}\n- Used citation keys: {len(cited)}\n"
+            f"- Unknown citation keys: {', '.join(unknown) or 'none'}\n",
+            encoding="utf-8",
+        )
+        quality_path.write_text(
+            "# Manuscript quality report\n\n"
+            f"- Status: {status}\n- Characters: {len(manuscript)}\n- Headings: {headings}\n"
+            f"- Configured minimum characters: {self.config.manuscript_min_chars}\n"
+            f"- Configured minimum headings: {self.config.manuscript_min_headings}\n"
+            f"- References section: {'yes' if has_references else 'no'}\n"
+            f"- Evidence placeholders: {len(placeholders)}\n- Unknown citations: {len(unknown)}\n"
+            f"- Skipped unsupported document sources: {len(skipped)}\n",
+            encoding="utf-8",
+        )
+        output_artifacts = {
+            "manuscript": str(manuscript_path),
+            "manuscript_evidence_ledger": str(ledger_path),
+            "manuscript_citation_audit": str(citation_path),
+            "manuscript_quality_report": str(quality_path),
+        }
+        return {
+            "message": f"完整论文第一版已生成（{status}）：{manuscript_path}\n\n{manuscript[:1400]}",
+            "artifacts": output_artifacts,
+            "data": {
+                "manuscript_id": manuscript_id, "status": status, "citation_keys": cited,
+                "unknown_citations": unknown, "evidence_placeholders": len(placeholders), "skipped_sources": skipped,
+            },
+            "progress": {"summary": f"论文第一版已生成：{status}", "metrics": {"citations": len(cited), "gaps": len(placeholders)}},
+        }
+
+    def _manuscript_evidence(
+        self,
+        arguments: dict[str, Any],
+        artifacts: dict[str, str],
+    ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]], list[str]]:
+        evidence: list[dict[str, Any]] = []
+        citations: dict[str, dict[str, Any]] = {}
+        skipped: list[str] = []
+        direct = str(arguments.get("text") or "").strip()
+        if direct:
+            evidence.append({"source": "user_text", "scope": "user_supplied", "content": direct})
+        raw_paths = list(arguments.get("evidence_paths") or []) + list(artifacts.values())
+        seen: set[Path] = set()
+        for raw in raw_paths:
+            if not isinstance(raw, (str, Path)) or not str(raw).strip():
+                continue
+            path = Path(str(raw)).expanduser().resolve()
+            if path in seen or not path.is_file():
+                continue
+            seen.add(path)
+            if path != self.workspace.session_root and self.workspace.session_root not in path.parents:
+                skipped.append(str(path))
+                continue
+            if path.suffix.lower() in {".docx", ".pdf", ".pptx", ".xlsx"}:
+                skipped.append(str(path))
+                continue
+            try:
+                text = path.read_text(encoding="utf-8-sig", errors="ignore")
+            except OSError:
+                skipped.append(str(path))
+                continue
+            record: dict[str, Any] = {"source": path.name, "path": str(path), "scope": "session_artifact"}
+            try:
+                payload = json.loads(text) if path.suffix.lower() == ".json" else None
+            except json.JSONDecodeError:
+                payload = None
+            if isinstance(payload, list):
+                rows = [item for item in payload if isinstance(item, dict)]
+                record["content"] = rows
+                for row in rows:
+                    key = str(row.get("citation_key") or "").strip()
+                    if key:
+                        citations[key] = {
+                            "citation_key": key, "title": row.get("title"), "year": row.get("year"),
+                            "doi": row.get("doi"), "source_url": row.get("source_url"),
+                            "evidence_scope": row.get("evidence_scope"),
+                        }
+            else:
+                record["content"] = text[:12000]
+            evidence.append(record)
+        return evidence, citations, skipped
 
     def _validate_review(self, text: str, papers: list[dict[str, Any]], matrix: str) -> None:
         """Reject empty/template-only drafts before they become artifacts."""
@@ -284,7 +436,7 @@ class WritingService:
             "humanize_text": "humanized_text.md",
             "design_visual": "visual_specification.md",
         }
-        path = self.session_dir / names[operation]
+        path = self.workspace.artifacts_root / names[operation]
         path.write_text(result.text.strip() + "\n", encoding="utf-8")
         return {
             "message": f"处理完成：{path}\n\n{result.text.strip()[:1200]}",
@@ -338,10 +490,10 @@ class WritingService:
         return row
 
     def _write_matrix(self, rows: list[dict[str, Any]]) -> dict[str, str]:
-        json_path = self.session_dir / "literature_matrix.json"
-        csv_path = self.session_dir / "literature_matrix.csv"
-        md_path = self.session_dir / "literature_matrix.md"
-        notes_path = self.session_dir / "summary_notes.md"
+        json_path = self.workspace.artifacts_root / "literature_matrix.json"
+        csv_path = self.workspace.artifacts_root / "literature_matrix.csv"
+        md_path = self.workspace.artifacts_root / "literature_matrix.md"
+        notes_path = self.workspace.artifacts_root / "summary_notes.md"
         json_path.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
         with csv_path.open("w", newline="", encoding="utf-8-sig") as handle:
             writer = csv.DictWriter(handle, fieldnames=MATRIX_FIELDS, extrasaction="ignore")
