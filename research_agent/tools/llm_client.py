@@ -159,7 +159,38 @@ def _extract_tool_calls_from_content(text: str) -> tuple[str, list[dict[str, Any
         return "", []
     extra = _extract_xml_tool_calls(text)
     cleaned = _strip_tool_call_text(text)
+    if _is_inside_fence(cleaned):
+        positions = [position for opener in _ToolCallStreamFilter._OPENERS if (position := cleaned.find(opener)) >= 0]
+        if positions:
+            cleaned = cleaned[: min(positions)].strip()
     return cleaned, extra
+
+
+def _merge_tool_calls(*groups: Any) -> list[dict[str, Any]]:
+    """Merge native and serialized calls without executing the same call twice."""
+    merged: list[dict[str, Any]] = []
+    signatures: set[tuple[str, str]] = set()
+    for group in groups:
+        if not isinstance(group, list):
+            continue
+        for call in group:
+            if not isinstance(call, dict):
+                continue
+            function = call.get("function") if isinstance(call.get("function"), dict) else {}
+            name = str(function.get("name") or "").strip()
+            arguments = function.get("arguments")
+            if not name:
+                continue
+            try:
+                canonical = json.dumps(json.loads(arguments or "{}"), ensure_ascii=False, sort_keys=True)
+            except (json.JSONDecodeError, TypeError):
+                canonical = str(arguments or "")
+            signature = (name, canonical)
+            if signature in signatures:
+                continue
+            signatures.add(signature)
+            merged.append(call)
+    return merged
 
 
 def _is_inside_fence(text: str) -> bool:
@@ -241,10 +272,16 @@ def _normalize_response(data: Any) -> NormalizedResponse:
     message = choice.get("message") if isinstance(choice.get("message"), dict) else {}
     content = message.get("content")
     reasoning = message.get("reasoning_content")
-    tool_calls = message.get("tool_calls")
+    text, serialized_calls = _extract_tool_calls_from_content(_message_text(content))
+    tool_calls = _merge_tool_calls(message.get("tool_calls"), serialized_calls)
+    if message:
+        message["content"] = text or None
+        if tool_calls:
+            message["tool_calls"] = tool_calls
+        else:
+            message.pop("tool_calls", None)
     tool_call_count = len(tool_calls) if isinstance(tool_calls, list) else int(bool(tool_calls))
     finish_reason = choice.get("finish_reason") if isinstance(choice.get("finish_reason"), str) else ""
-    text = _message_text(content)
     if tool_call_count:
         outcome = "native_tool_call"
     elif text:
@@ -379,14 +416,12 @@ class OpenAICompatibleProvider:
             on_event(ProviderEvent("assistant_delta", {"text": remaining}))
         raw_content = "".join(content)
         cleaned, extra_calls = _extract_tool_calls_from_content(raw_content)
-        for ec in extra_calls:
-            idx = len(calls)
-            calls[idx] = ec
+        merged_calls = _merge_tool_calls([calls[index] for index in sorted(calls)], extra_calls)
         message: dict[str, Any] = {"role": "assistant", "content": cleaned or None}
         if reasoning:
             message["reasoning_content"] = "".join(reasoning)
-        if calls:
-            message["tool_calls"] = [calls[index] for index in sorted(calls)]
+        if merged_calls:
+            message["tool_calls"] = merged_calls
         return {"choices": [{"finish_reason": finish_reason, "message": message}], "usage": usage}
 
 
@@ -441,7 +476,7 @@ class ModelGateway:
         for attempt in range(1, attempts + 1):
             request_body = dict(body)
             if attempt > 1:
-                _time.sleep(1.0)  # polite back-off between retries
+                _time.sleep(min(30.0, 0.5 * (2 ** (attempt - 1))))  # exponential back-off
             call = self.ledger.begin(self.config.llm_provider, self.config.llm_model, operation, attempt)
             if sink:
                 sink(ProviderEvent("provider_call_started", {

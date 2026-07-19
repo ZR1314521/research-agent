@@ -45,8 +45,11 @@ class PromptRuntime:
         artifact_records = dict(getattr(session, "artifact_records", {}) or {})
         pending = getattr(session, "pending_action", None)
         plan = getattr(session, "metadata", {}).get("plan_mode", False)
+        goal = getattr(session, "goal", "")
 
         parts: list[str] = []
+        if goal:
+            parts.append(goal)
         if plan:
             parts.append("当前处于规划模式。写操作工具已隐藏，搜索和阅读工具可用但建议先向用户说明意图。")
         if pending:

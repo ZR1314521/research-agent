@@ -41,12 +41,12 @@ def validate_arguments(schema: dict[str, Any], arguments: dict[str, Any]) -> Non
     if unknown and schema.get("additionalProperties", False) is False:
         raise ContractError(
             "unknown_argument",
-            f"工具不接受参数: {', '.join(unknown)}",
+            f"工具不接受参数: {', '.join(unknown)}；有效参数: {', '.join(sorted(properties))}",
             details={"allowed": sorted(properties), "unknown": unknown},
         )
     missing = [name for name in schema.get("required", []) if arguments.get(name) in (None, "", [])]
     if missing:
-        raise ContractError("missing_argument", f"工具缺少必填参数: {', '.join(missing)}", details={"missing": missing})
+        raise ContractError("missing_argument", f"工具缺少必填参数: {', '.join(missing)}；有效参数: {', '.join(sorted(properties))}", details={"missing": missing})
     any_of = schema.get("required_any_of") or []
     if any_of and not any(arguments.get(name) not in (None, "", []) for name in any_of):
         raise ContractError("missing_argument", f"工具至少需要一个参数: {', '.join(any_of)}", details={"one_of": any_of})

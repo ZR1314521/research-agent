@@ -77,6 +77,8 @@ class AgentLoop:
         )
 
     def run(self, session: ChatSession, user_message: str) -> AgentResult:
+        if not session.goal and not user_message.startswith("/"):
+            session.goal = user_message.strip()[:200]
         return self._drive(session, self._conversation(session, user_message), user_message, LoopState())
 
     def resume(self, session: ChatSession, approved: bool) -> AgentResult:
@@ -89,9 +91,17 @@ class AgentLoop:
             return AgentResult("当前没有等待确认的操作。", waiting=False)
 
         messages = [dict(item) for item in pending.get("model_messages", session.model_messages)]
+        raw_calls = pending.get("tool_calls") or []
         # Purge orphan tool_calls left by a cancelled turn before the
-        # sanitisation fix — otherwise the provider returns HTTP 400.
-        if messages and messages[-1].get("role") == "assistant" and messages[-1].get("tool_calls"):
+        # sanitisation fix — otherwise the provider returns HTTP 400. A pending
+        # approval is not orphaned: its assistant tool_calls must remain in the
+        # conversation so the approved/rejected tool results have an owner.
+        if (
+            not raw_calls
+            and messages
+            and messages[-1].get("role") == "assistant"
+            and messages[-1].get("tool_calls")
+        ):
             messages[-1].pop("tool_calls", None)
             if not messages[-1].get("content"):
                 messages[-1]["content"] = "（操作已取消）"
@@ -122,7 +132,6 @@ class AgentLoop:
             self.sessions.save(session)
             return self._drive(session, messages, user_message, state)
 
-        raw_calls = pending.get("tool_calls") or []
         if approved:
             self.sessions.event(session, "approval_resolved", state.last_skill, "tool call accepted", approved=True)
             stopped = self._execute_calls(session, messages, raw_calls, user_message, state)
